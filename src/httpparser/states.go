@@ -10,4 +10,7 @@ const (
 	Headers
 	Body
 	MessageCompleted
+
+	Nothing
+	ReceivedLF
 )
