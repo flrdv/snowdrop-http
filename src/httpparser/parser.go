@@ -94,7 +94,11 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				parser.currentState = Body
 
 				if index + 1 < len(data) {
-					parser.parseBodyPart(data[index+1:])
+					done := parser.parseBodyPart(data[index+1:])
+
+					if done {
+						return true, nil
+					}
 				}
 
 				break
