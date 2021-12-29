@@ -1,7 +1,6 @@
 package httpparser
 
 import (
-	"bytes"
 	"errors"
 	"strconv"
 	"strings"
@@ -54,8 +53,15 @@ func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
 	return &parser
 }
 
-func (parser *HTTPRequestParser) Reuse(protocol *IProtocol) {
-	// TODO: just re-initialize struct values
+func (parser *HTTPRequestParser) Reuse(protocol IProtocol) {
+	parser.Protocol = protocol
+	parser.splitterState = Nothing
+	parser.currentState = Method
+	parser.currentSplitter = ' '
+	parser.contentLength = 0
+	parser.bodyBytesReceived = 0
+	// tempBuf must be already empty as it is empty while headers are completely parsed
+	protocol.OnMessageBegin()
 }
 
 func (parser *HTTPRequestParser) GetState() ParsingState {
@@ -189,41 +195,4 @@ func parseHeader(headersBytesString []byte) (key *string, value *string, err err
 	}
 
 	return nil, nil, NoSplitterWasFound
-}
-
-func splitBytes(src, splitBy []byte) [][]byte {
-	if len(src) == 0 {
-		return [][]byte{}
-	}
-
-	var splited [][]byte
-	var afterPrevSplitBy uint
-	var skipIters int
-	lookForward := len(splitBy)
-
-	for index := range src[:len(src)-lookForward] {
-		if skipIters > 0 {
-			skipIters--
-			continue
-		}
-
-		if bytes.Equal(src[index:index+lookForward], splitBy) {
-			splited = append(splited, src[afterPrevSplitBy:index])
-			afterPrevSplitBy = uint(index + lookForward)
-			skipIters = lookForward
-		}
-	}
-
-	if len(splited) == 0 {
-		splited = append(splited, src)
-	} else if bytes.HasSuffix(src, splitBy) {
-		// if source ends with splitter, we must add pending
-		// shit without counting splitter in the end
-		splited = append(splited, src[afterPrevSplitBy:len(src)-lookForward])
-	} else {
-		// or add pending shit, but with counting everything in the end
-		splited = append(splited, src[afterPrevSplitBy:])
-	}
-
-	return splited
 }
