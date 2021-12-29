@@ -1,3 +1,3 @@
-module "gtihub.com/floordiv/snowdrop"
+module "github.com/floordiv/snowdrop"
 
 go 1.16
