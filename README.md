@@ -23,3 +23,32 @@ Example of implemented protocol you can find [here](https://github.com/floordiv/
 
 Just like LLHTTP, OnBody() callback receives a part of body that was received. In case of chunked requests, OnBody() may receive not the whole chunk, but a part, depending on 
 whether the whole chunk will be fed to the parser. But guaranteed that OnBody() won't receive more than whole chunk per once
+
+# Example:
+
+```
+package main
+
+import (
+	"github.com/floordiv/snowdrop-http/src/httpparser"
+)
+
+
+type Protocol struct {
+	// implement httpparser.IProtocol here
+}
+
+
+func main() {
+	protocol := Protocol{...}
+	parser := httpparser.NewHTTPRequestParser(&protocol)
+	data := ... // http request taken from any source, but []byte
+	completed, err := parser.Feed(data)
+	
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	// that's it! Now everything has been processed with your protocol
+}
+```
