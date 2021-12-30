@@ -50,7 +50,7 @@ func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
 		protocol: protocol,
 		splitterState: Nothing,
 		currentState: Method,
-		currentSplitter: ' ',
+		currentSplitter: splittersTable[Method],
 		tempBuf: make([]byte, 0, MaxBufLen),
 	}
 	protocol.OnMessageBegin()
@@ -62,7 +62,7 @@ func (parser *HTTPRequestParser) Reuse(protocol IProtocol) {
 	parser.protocol = protocol
 	parser.splitterState = Nothing
 	parser.currentState = Method
-	parser.currentSplitter = ' '
+	parser.currentSplitter = splittersTable[Method]
 	parser.contentLength = 0
 	parser.bodyBytesReceived = 0
 	// tempBuf must be already empty as it is empty while headers are completely parsed
@@ -105,9 +105,17 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				parser.currentState = Body
 
 				if index + 1 < len(data) {
-					done := parser.parseBodyPart(data[index+1:])
+					isMessageCompleted := parser.parseBodyPart(data[index+1:])
 
-					return done, nil
+					if isMessageCompleted {
+						parser.completeMessage()
+					}
+
+					return isMessageCompleted, nil
+				} else if parser.contentLength == 0 {
+					parser.completeMessage()
+
+					return true, nil
 				}
 
 				return false, nil
@@ -147,16 +155,14 @@ func (parser *HTTPRequestParser) incState() {
 
 func (parser *HTTPRequestParser) parseBodyPart(data []byte) (completed bool) {
 	if parser.contentLength == 0 {
-		parser.currentState = MessageCompleted
-		parser.protocol.OnMessageComplete()
+		parser.completeMessage()
 
 		return true
 	}
 
 	if int64(len(data)) >= parser.contentLength - parser.bodyBytesReceived {
 		parser.protocol.OnBody(data[:parser.contentLength - parser.bodyBytesReceived])
-		parser.protocol.OnMessageComplete()
-		parser.currentState = MessageCompleted
+		parser.completeMessage()
 		parser.bodyBytesReceived = parser.contentLength
 
 		return true
@@ -166,6 +172,11 @@ func (parser *HTTPRequestParser) parseBodyPart(data []byte) (completed bool) {
 
 		return false
 	}
+}
+
+func (parser *HTTPRequestParser) completeMessage() {
+	parser.currentState = MessageCompleted
+	parser.protocol.OnMessageComplete()
 }
 
 func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
