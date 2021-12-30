@@ -21,12 +21,38 @@ type Protocol interface {
 
 Example of implemented protocol you can find [here](https://github.com/floordiv/snowdrop-http/blob/master/tests/parser_test.go#L9)
 
-Just like LLHTTP, OnBody() callback receives a part of body that was received. In case of chunked requests, OnBody() may receive not the whole chunk, but a part, depending on 
-whether the whole chunk will be fed to the parser. But guaranteed that OnBody() won't receive more than whole chunk per once
+# FAQ
+> *Q*: How does parser behave in case of chunked request?
+
+> *A*: OnBody() callback will be called. There are no guarantees that the whole chunk will be passed once, but may be only a part of actual chunk, depends on how much data will be fed
+
+<br>
+
+> *Q*: How does parser behave in case of extra-bytes are passed?
+
+> *A*: They'll be just ignored
+
+<br>
+
+> *Q*: Can it parse requests that use not CRLF, but just LF?
+
+> *A*: Yes. Parser is built that it ignores all the \r characters (you should keep this feature in your mind as this is possibly security issue), so it parses CRLF sequences as well as LF
+
+<br>
+
+> *Q*: What's if it is not a GET request, but Content-Length is not specified?
+
+> *A*: Body won't be parsed, parser will think this request has empty body
+
+<br>
+
+> *Q*: How will parser behave in case of empty request body?
+
+> *A*: OnBody() won't be called during parsing, but OnMessageComplete() will
 
 # Example:
 
-```
+```golang
 package main
 
 import (
