@@ -19,6 +19,8 @@ var splittersTable = map[ParsingState]byte{
 	Body: '\n',
 }
 
+const MaxBufLen = 65535
+
 type IProtocol interface {
 	OnMessageBegin()
 	OnMethod([]byte)
@@ -32,7 +34,7 @@ type IProtocol interface {
 }
 
 type HTTPRequestParser struct {
-	Protocol 	 		IProtocol
+	protocol 	 		IProtocol
 
 	splitterState 		ParsingState
 	currentState 		ParsingState
@@ -44,17 +46,20 @@ type HTTPRequestParser struct {
 }
 
 func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
-	parser := HTTPRequestParser{Protocol: protocol}
-	parser.splitterState = Nothing
-	parser.currentState = Method
-	parser.currentSplitter = ' '
+	parser := HTTPRequestParser{
+		protocol: protocol,
+		splitterState: Nothing,
+		currentState: Method,
+		currentSplitter: ' ',
+		tempBuf: make([]byte, 0, MaxBufLen),
+	}
 	protocol.OnMessageBegin()
 
 	return &parser
 }
 
 func (parser *HTTPRequestParser) Reuse(protocol IProtocol) {
-	parser.Protocol = protocol
+	parser.protocol = protocol
 	parser.splitterState = Nothing
 	parser.currentState = Method
 	parser.currentSplitter = ' '
@@ -90,18 +95,16 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 					return true, RequestSyntaxError
 				}
 
-				parser.Protocol.OnHeadersComplete()
+				parser.protocol.OnHeadersComplete()
 				parser.currentState = Body
 
 				if index + 1 < len(data) {
 					done := parser.parseBodyPart(data[index+1:])
 
-					if done {
-						return true, nil
-					}
+					return done, nil
 				}
-
-				break
+				
+				return false, nil
 			} else if parser.currentState == Headers {
 				if err := parser.pushHeaderFromBuf(); err != nil {
 					return true, err
@@ -111,11 +114,11 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				// sometimes may go po pizde as there is no default case,
 				// but currently there are more priority tasks
 				switch parser.currentState {
-				case Method: parser.Protocol.OnMethod(parser.tempBuf)
-				case Path: parser.Protocol.OnPath(parser.tempBuf)
+				case Method: parser.protocol.OnMethod(parser.tempBuf)
+				case Path: parser.protocol.OnPath(parser.tempBuf)
 				case Protocol:
-					parser.Protocol.OnProtocol(parser.tempBuf)
-					parser.Protocol.OnHeadersBegin()
+					parser.protocol.OnProtocol(parser.tempBuf)
+					parser.protocol.OnHeadersBegin()
 				}
 
 				parser.incState()
@@ -145,20 +148,20 @@ func (parser *HTTPRequestParser) incState() {
 func (parser *HTTPRequestParser) parseBodyPart(data []byte) (completed bool) {
 	if parser.contentLength == 0 {
 		parser.currentState = MessageCompleted
-		parser.Protocol.OnMessageComplete()
+		parser.protocol.OnMessageComplete()
 
 		return true
 	}
 
 	if int64(len(data)) >= parser.contentLength - parser.bodyBytesReceived {
-		parser.Protocol.OnBody(data[:parser.contentLength - parser.bodyBytesReceived])
-		parser.Protocol.OnMessageComplete()
+		parser.protocol.OnBody(data[:parser.contentLength - parser.bodyBytesReceived])
+		parser.protocol.OnMessageComplete()
 		parser.currentState = MessageCompleted
 		parser.bodyBytesReceived = parser.contentLength
 
 		return true
 	} else {
-		parser.Protocol.OnBody(data)
+		parser.protocol.OnBody(data)
 		parser.bodyBytesReceived += int64(len(data))
 
 		return false
@@ -172,7 +175,7 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
 		return err
 	}
 
-	parser.Protocol.OnHeader(*key, *value)
+	parser.protocol.OnHeader(*key, *value)
 	parser.tempBuf = nil
 
 	if strings.ToLower(*key) == "content-length" {
