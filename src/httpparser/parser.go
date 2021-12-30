@@ -89,7 +89,13 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 			continue
 		}
 
-		if char == parser.currentSplitter {
+		if char != parser.currentSplitter {
+			parser.tempBuf = append(parser.tempBuf, char)
+
+			if parser.splitterState != Nothing {
+				parser.splitterState = Nothing
+			}
+		} else {
 			if char == '\n' && parser.splitterState == ReceivedLF {
 				if parser.currentState != Headers {
 					return true, RequestSyntaxError
@@ -103,7 +109,7 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 
 					return done, nil
 				}
-				
+
 				return false, nil
 			} else if parser.currentState == Headers {
 				if err := parser.pushHeaderFromBuf(); err != nil {
@@ -127,12 +133,6 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 
 			if char == '\n' {
 				parser.splitterState = ReceivedLF
-			}
-		} else {
-			parser.tempBuf = append(parser.tempBuf, char)
-
-			if parser.splitterState != Nothing {
-				parser.splitterState = Nothing
 			}
 		}
 	}
@@ -175,11 +175,11 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
 		return err
 	}
 
-	parser.protocol.OnHeader(*key, *value)
+	parser.protocol.OnHeader(key, value)
 	parser.tempBuf = nil
 
-	if strings.ToLower(*key) == "content-length" {
-		contentLength, err := strconv.ParseInt(*value, 10, 0)
+	if strings.ToLower(key) == "content-length" {
+		contentLength, err := strconv.ParseInt(value, 10, 0)
 
 		if err != nil {
 			return InvalidContentLengthValue
@@ -191,15 +191,15 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
 	return nil
 }
 
-func parseHeader(headersBytesString []byte) (key *string, value *string, err error) {
+func parseHeader(headersBytesString []byte) (key, value string, err error) {
 	for index, char := range headersBytesString {
 		if char == ':' {
 			key := string(headersBytesString[:index])
 			value := strings.TrimPrefix(string(headersBytesString[index+1:]), " ")
 
-			return &key, &value, nil
+			return key, value, nil
 		}
 	}
 
-	return nil, nil, NoSplitterWasFound
+	return "", "", NoSplitterWasFound
 }
