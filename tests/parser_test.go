@@ -55,6 +55,7 @@ func expect(
 	expectedMethod, expectedPath, expectedProtocolString string,
 	headers map[string]string,
 	expectedBodyLength int,
+	expectBody string,
 	strictHeadersCheck bool) (succeeded bool, err string) {
 
 	if string(protocol.Method) != expectedMethod {
@@ -91,9 +92,12 @@ func expect(
 		}
 	}
 
-	if len(protocol.Body) != expectedBodyLength {
+	if expectedBodyLength >= 0 && len(protocol.Body) != expectedBodyLength {
 		return false, fmt.Sprintf("mismatching body length: expected %d, got %d",
 			expectedBodyLength, len(protocol.Body))
+	} else if string(protocol.Body) != expectBody {
+		return false, fmt.Sprintf("mismatching body: expected \"%s\", got \"%s\"",
+			expectBody, string(protocol.Body))
 	}
 
 	return true, ""
@@ -124,7 +128,7 @@ func TestOrdinaryGETRequestParse(t *testing.T) {
 
 	succeeded, errmsg := expect(protocol,
 		methodExpected, pathExpected, protocolExpected,
-		headersExpected, bodyLenExpected, true)
+		headersExpected, bodyLenExpected, "", true)
 
 	if !succeeded {
 		t.Error(errmsg)
@@ -157,7 +161,7 @@ func TestOrdinaryPOSTRequestParse(t *testing.T) {
 
 	succeeded, errmsg := expect(protocol,
 		methodExpected, pathExpected, protocolExpected,
-		headersExpected, bodyLenExpected, true)
+		headersExpected, bodyLenExpected, "Hello, world!", true)
 
 	if !succeeded {
 		t.Error(errmsg)
@@ -198,7 +202,43 @@ func TestChromeGETRequest(t *testing.T) {
 
 	succeeded, errmsg := expect(protocol,
 		methodExpected, pathExpected, protocolExpected,
-		headersExpected, bodyLenExpected, false)
+		headersExpected, bodyLenExpected, "", false)
+
+	if !succeeded {
+		t.Error(errmsg)
+	}
+}
+
+func TestChunkedTransferEncoding(t *testing.T) {
+	request := "POST / HTTP/1.1\r\n" +
+		"Content-Type: some content type\n\r" +
+		"Host: rush.dev\r\n" +
+		"Transfer-Encoding: chunked\r\n" +
+		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n"
+
+	methodExpected := "POST"
+	pathExpected := "/"
+	protocolExpected := "HTTP/1.1"
+	headersExpected := map[string]string {
+		"Content-Type": "some content type",
+		"Host": "rush.dev",
+		"Transfer-Encoding": "chunked",
+	}
+	expectBody := "Hello, world!But what's wrong with you?Finally am here"
+
+	protocol := Protocol{}
+	parser := httpparser.NewHTTPRequestParser(&protocol)
+	completed, err := parser.Feed([]byte(request))
+
+	if err != nil {
+		t.Errorf("error while parsing: %s", err)
+	} else if !completed {
+		t.Errorf("the whole request was fed to parser but he does not think so")
+	}
+
+	succeeded, errmsg := expect(protocol,
+		methodExpected, pathExpected, protocolExpected,
+		headersExpected, -1, expectBody, false)
 
 	if !succeeded {
 		t.Error(errmsg)
