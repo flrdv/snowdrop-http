@@ -7,9 +7,9 @@ import (
 
 
 const (
-	MaxChunkSize = 65535
-	MaxHexChunkSize = "FFFF"
-	ChunkSizeBitSize = 16
+	_maxChunkSize = 65535
+	_maxHexChunkSize = "FFFF"
+	_chunkSizeBitSize = 16
 )
 
 var (
@@ -39,7 +39,7 @@ func NewChunkedBodyParser(callback OnBodyCallback) *chunkedBodyParser {
 		callback:                  callback,
 		state:                     ExpectingChunkLength,
 		currentChunkLength:        0,
-		tempBuf:                   make([]byte, 0, MaxChunkSize),
+		tempBuf:                   make([]byte, 0, _maxChunkSize),
 		chunksReceived:            0,
 	}
 }
@@ -67,7 +67,7 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, chunkErr error) {
 
 		if char == '\n' {
 			if p.state == ExpectingChunkLength {
-				chunkLength, err := strconv.ParseUint(string(p.tempBuf), 16, ChunkSizeBitSize)
+				chunkLength, err := strconv.ParseUint(string(p.tempBuf), 16, _chunkSizeBitSize)
 
 				if err != nil {
 					return true, InvalidChunkLength
@@ -94,9 +94,9 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, chunkErr error) {
 			p.tempBuf = append(p.tempBuf, char)
 
 			switch {
-			case p.state == ExpectingChunkLength && len(p.tempBuf) > len(MaxHexChunkSize):
+			case p.state == ExpectingChunkLength && len(p.tempBuf) > len(_maxHexChunkSize):
 				return true, TooBigChunkSize
-			case p.state == ExpectingChunk && len(p.tempBuf) >= MaxChunkSize:
+			case p.state == ExpectingChunk && len(p.tempBuf) >= _maxChunkSize:
 				return true, TooBigChunk
 			}
 		}
