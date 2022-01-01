@@ -1,15 +1,10 @@
 package httpparser
 
 import (
-	"errors"
+	"bytes"
 	"strconv"
 	"strings"
 )
-
-
-var RequestSyntaxError 			= errors.New("request syntax error")
-var InvalidContentLengthValue 	= errors.New("invalid value for content-length header")
-var NoSplitterWasFound 			= errors.New("no splitter was found")
 
 var splittersTable = map[ParsingState]byte{
 	Method: 	' ',
@@ -17,6 +12,10 @@ var splittersTable = map[ParsingState]byte{
 	Protocol: 	'\n',
 	Headers: 	'\n',
 	Body: 		'\n',
+}
+
+var SupportedProtocols = [][]byte{
+	[]byte("HTTP/0.9"), []byte("HTTP/1.0"), []byte("HTTP/1.1"),
 }
 
 const MaxBufLen = 65535
@@ -91,6 +90,8 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 			done, err := parser.bodyChunksParser.Feed(data)
 
 			if err != nil {
+				parser.completeMessageNoCallback()
+
 				return true, err
 			}
 
@@ -122,6 +123,8 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 		} else {
 			if char == '\n' && parser.splitterState == ReceivedLF {
 				if parser.currentState != Headers {
+					parser.completeMessageNoCallback()
+
 					return true, RequestSyntaxError
 				}
 
@@ -139,10 +142,12 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				} else if parser.isChunkedRequest {
 					done, err := parser.bodyChunksParser.Feed(data[index+1:])
 
+
 					if err != nil {
+						parser.completeMessageNoCallback()
+
 						return true, err
 					}
-
 					if done {
 						parser.completeMessage()
 					}
@@ -157,6 +162,8 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				return false, nil
 			} else if parser.currentState == Headers {
 				if err := parser.pushHeaderFromBuf(); err != nil {
+					parser.completeMessageNoCallback()
+
 					return true, err
 				}
 			} else {
@@ -164,9 +171,29 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				// sometimes may go po pizde as there is no default case,
 				// but currently there are more priority tasks
 				switch parser.currentState {
-				case Method: parser.protocol.OnMethod(parser.tempBuf)
-				case Path: parser.protocol.OnPath(parser.tempBuf)
+				case Method:
+					if !IsMethodValid(parser.tempBuf) {
+						parser.completeMessageNoCallback()
+
+						return true, InvalidRequestData
+					}
+
+					parser.protocol.OnMethod(parser.tempBuf)
+				case Path:
+					if len(parser.tempBuf) == 0 {
+						parser.completeMessageNoCallback()
+
+						return true, InvalidRequestData
+					}
+
+					parser.protocol.OnPath(parser.tempBuf)
 				case Protocol:
+					if !isProtocolValid(parser.tempBuf) {
+						parser.completeMessageNoCallback()
+
+						return true, InvalidRequestData
+					}
+
 					parser.protocol.OnProtocol(parser.tempBuf)
 					parser.protocol.OnHeadersBegin()
 				}
@@ -215,6 +242,14 @@ func (parser *HTTPRequestParser) completeMessage() {
 	parser.protocol.OnMessageComplete()
 }
 
+func (parser *HTTPRequestParser) completeMessageNoCallback() {
+	/*
+	The difference is that this method used usually after errors
+	occurred, so message is completed and can't be parsed anymore
+	 */
+	parser.currentState = MessageCompleted
+}
+
 func (parser *HTTPRequestParser) pushHeaderFromBuf() (err error) {
 	key, value, err := parseHeader(parser.tempBuf)
 
@@ -239,6 +274,16 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (err error) {
 	}
 
 	return nil
+}
+
+func isProtocolValid(proto []byte) bool {
+	for _, supportedProto := range SupportedProtocols {
+		if bytes.Equal(supportedProto, proto) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func parseHeader(headersBytesString []byte) (key, value string, err error) {
