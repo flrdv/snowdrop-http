@@ -12,11 +12,11 @@ var InvalidContentLengthValue = errors.New("invalid value for content-length hea
 var NoSplitterWasFound = errors.New("no splitter was found")
 
 var splittersTable = map[ParsingState]byte{
-	Method: ' ',
-	Path: ' ',
-	Protocol: '\n',
-	Headers: '\n',
-	Body: '\n',
+	Method: 	' ',
+	Path: 		' ',
+	Protocol: 	'\n',
+	Headers: 	'\n',
+	Body: 		'\n',
 }
 
 const MaxBufLen = 65535
@@ -34,7 +34,7 @@ type IProtocol interface {
 }
 
 type HTTPRequestParser struct {
-	protocol 	 		IProtocol
+	protocol            IProtocol
 
 	splitterState 		ParsingState
 	currentState 		ParsingState
@@ -42,29 +42,24 @@ type HTTPRequestParser struct {
 
 	contentLength 		int64
 	bodyBytesReceived 	int64
-	tempBuf 			[]byte
-}
+	tempBuf             []byte
 
-func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
-	parser := HTTPRequestParser{
-		protocol: protocol,
-		splitterState: Nothing,
-		currentState: Method,
-		currentSplitter: splittersTable[Method],
-		tempBuf: make([]byte, 0, MaxBufLen),
-	}
-	protocol.OnMessageBegin()
-
-	return &parser
+	isChunkedRequest	bool
+	bodyChunksParser 	*chunkedBodyParser
 }
 
 func (parser *HTTPRequestParser) Reuse(protocol IProtocol) {
 	parser.protocol = protocol
 	parser.splitterState = Nothing
 	parser.currentState = Method
-	parser.currentSplitter = splittersTable[Method]
+	parser.currentSplitter = splittersTable[parser.currentState]
 	parser.contentLength = 0
 	parser.bodyBytesReceived = 0
+
+	if parser.isChunkedRequest {
+		parser.isChunkedRequest = false
+		parser.bodyChunksParser.Reuse(protocol.OnBody)
+	}
 	// tempBuf must be already empty as it is empty while headers are completely parsed
 	protocol.OnMessageBegin()
 }
@@ -77,9 +72,23 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 	if parser.currentState == MessageCompleted {
 		return true, nil
 	} else if parser.currentState == Body {
-		done := parser.parseBodyPart(data)
+		if parser.isChunkedRequest {
+			done, err := parser.bodyChunksParser.Feed(data)
 
-		return done, nil
+			if err != nil {
+				return true, err
+			}
+
+			if done {
+				parser.completeMessage()
+			}
+
+			return done, nil
+		} else {
+			done := parser.parseBodyPart(data)
+
+			return done, nil
+		}
 	}
 
 	for index, char := range data {
@@ -104,7 +113,7 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				parser.protocol.OnHeadersComplete()
 				parser.currentState = Body
 
-				if index + 1 < len(data) {
+				if index + 1 < len(data) && !parser.isChunkedRequest {
 					isMessageCompleted := parser.parseBodyPart(data[index+1:])
 
 					if isMessageCompleted {
@@ -112,6 +121,18 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 					}
 
 					return isMessageCompleted, nil
+				} else if parser.isChunkedRequest {
+					done, err := parser.bodyChunksParser.Feed(data[index+1:])
+
+					if err != nil {
+						return true, err
+					}
+
+					if done {
+						parser.completeMessage()
+					}
+
+					return done, nil
 				} else if parser.contentLength == 0 {
 					parser.completeMessage()
 
@@ -179,7 +200,7 @@ func (parser *HTTPRequestParser) completeMessage() {
 	parser.protocol.OnMessageComplete()
 }
 
-func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
+func (parser *HTTPRequestParser) pushHeaderFromBuf() (err error) {
 	key, value, err := parseHeader(parser.tempBuf)
 
 	if err != nil {
@@ -189,7 +210,8 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
 	parser.protocol.OnHeader(key, value)
 	parser.tempBuf = nil
 
-	if strings.ToLower(key) == "content-length" {
+	switch strings.ToLower(key) {
+	case "content-length":
 		contentLength, err := strconv.ParseInt(value, 10, 0)
 
 		if err != nil {
@@ -197,9 +219,27 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (ok error) {
 		}
 
 		parser.contentLength = contentLength
+	case "transfer-encoding":
+		parser.isChunkedRequest = strings.ToLower(value) == "chunked"
 	}
 
 	return nil
+}
+
+
+func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
+	parser := HTTPRequestParser{
+		protocol: 			protocol,
+		splitterState:  	Nothing,
+		currentState: 		Method,
+		currentSplitter: 	splittersTable[Method],
+		tempBuf: 			make([]byte, 0, MaxBufLen),
+		isChunkedRequest: 	false,
+		bodyChunksParser: 	NewChunkedBodyParser(protocol.OnBody),
+	}
+	protocol.OnMessageBegin()
+
+	return &parser
 }
 
 func parseHeader(headersBytesString []byte) (key, value string, err error) {
