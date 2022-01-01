@@ -13,4 +13,8 @@ const (
 
 	Nothing
 	ReceivedLF
+
+	ExpectingChunkLength
+	ExpectingChunk
+	BodyCompleted
 )
