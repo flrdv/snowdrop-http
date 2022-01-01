@@ -104,8 +104,15 @@ func expect(
 	return true, ""
 }
 
+func getChunkLength(originLen int, request []byte) int {
+	if originLen == -1 {
+		return len(request)
+	}
 
-func TestOrdinaryGETRequestParse(t *testing.T) {
+	return originLen
+}
+
+func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol)
 
@@ -119,7 +126,7 @@ func TestOrdinaryGETRequestParse(t *testing.T) {
 	bodyLenExpected := 0
 
 	ordinaryGetRequest := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	err := FeedParser(parser, ordinaryGetRequest, 5)
+	_, err := FeedParser(parser, ordinaryGetRequest, getChunkLength(chunkSize, ordinaryGetRequest))
 
 	if err != nil {
 		t.Errorf("parser returned error: %s\n", err)
@@ -136,12 +143,45 @@ func TestOrdinaryGETRequestParse(t *testing.T) {
 	}
 }
 
-func TestOrdinaryPOSTRequestParse(t *testing.T) {
+func TestOrdinaryGETRequestParse1Char(t *testing.T) {
+	testOrdinaryGETRequestParse(t, 1)
+}
+
+func TestOrdinaryGETRequestParse2Chars(t *testing.T) {
+	testOrdinaryGETRequestParse(t, 2)
+}
+
+func TestOrdinaryGETRequestParse5Chars(t *testing.T) {
+	testOrdinaryGETRequestParse(t, 5)
+}
+
+func TestOrdinaryGETRequestParseFull(t *testing.T) {
+	testOrdinaryGETRequestParse(t, -1)
+}
+
+func TestInvalidGETRequestMissingMethod(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewHTTPRequestParser(&protocol)
+
+	ordinaryGetRequest := []byte("/ HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	completed, err := FeedParser(parser, ordinaryGetRequest, getChunkLength(5, ordinaryGetRequest))
+
+	if err == nil && !protocol.Completed {
+		t.Error("parser didn't return an error and didn't mark request as completed")
+	} else if err == nil {
+		t.Error("parser didn't return an error")
+	} else if !completed {
+		t.Error("unexpected behaviour: parser doesn't mark request as completed")
+	}
+}
+
+func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol)
 
 	ordinaryGetRequest := []byte("POST / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev" +
 		"\r\nContent-Length: 13\r\n\r\nHello, world!")
+
 	methodExpected := "POST"
 	pathExpected := "/"
 	protocolExpected := "HTTP/1.1"
@@ -152,7 +192,7 @@ func TestOrdinaryPOSTRequestParse(t *testing.T) {
 	}
 	bodyLenExpected := 13
 
-	err := FeedParser(parser, ordinaryGetRequest, 5)
+	_, err := FeedParser(parser, ordinaryGetRequest, getChunkLength(chunkSize, ordinaryGetRequest))
 
 	if err != nil {
 		t.Errorf("parser returned error: %s\n", err)
@@ -167,6 +207,22 @@ func TestOrdinaryPOSTRequestParse(t *testing.T) {
 	if !succeeded {
 		t.Error(errmsg)
 	}
+}
+
+func TestOrdinaryPOSTRequestParse1Char(t *testing.T) {
+	testOrdinaryPOSTRequestParse(t, 1)
+}
+
+func TestOrdinaryPOSTRequestParse2Chars(t *testing.T) {
+	testOrdinaryPOSTRequestParse(t, 2)
+}
+
+func TestOrdinaryPOSTRequestParse5Chars(t *testing.T) {
+	testOrdinaryPOSTRequestParse(t, 5)
+}
+
+func TestOrdinaryPOSTRequestParseFull(t *testing.T) {
+	testOrdinaryPOSTRequestParse(t, -1)
 }
 
 func TestChromeGETRequest(t *testing.T) {
