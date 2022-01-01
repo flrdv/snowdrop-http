@@ -1,7 +1,6 @@
 package httpparser
 
 import (
-	"errors"
 	"strconv"
 )
 
@@ -10,13 +9,6 @@ const (
 	_maxChunkSize = 65535
 	_maxHexChunkSize = "FFFF"
 	_chunkSizeBitSize = 16
-)
-
-var (
-	TooBigChunk = errors.New("chunk overflow")
-	TooBigChunkSize = errors.New("chunk size is too big")
-	NotEnoughChunk = errors.New("received unexpected CRLF before the whole chunk was received")
-	InvalidChunkLength = errors.New("chunk length hexdecimal is invalid")
 )
 
 type (
