@@ -6,16 +6,25 @@ import (
 )
 
 
-const MaxChunkSize = 65535
-const MaxHexChunkSize = "FFFF"
-const ChunkSizeBitSize = 16
-var TooBigChunk = errors.New("chunk overflow")
-var TooBigChunkSize = errors.New("chunk size is too big")
-var NotEnoughChunk = errors.New("received unexpected CRLF before the whole chunk was received")
-var InvalidChunkLength = errors.New("chunk length hexdecimal is invalid")
+const (
+	MaxChunkSize = 65535
+	MaxHexChunkSize = "FFFF"
+	ChunkSizeBitSize = 16
+)
 
-type ChunkSizeType uint16
-type OnBodyCallback func([]byte)
+var (
+	TooBigChunk = errors.New("chunk overflow")
+	TooBigChunkSize = errors.New("chunk size is too big")
+	NotEnoughChunk = errors.New("received unexpected CRLF before the whole chunk was received")
+	InvalidChunkLength = errors.New("chunk length hexdecimal is invalid")
+)
+
+type (
+	ChunkSizeType uint16
+	OnBodyCallback func([]byte)
+
+
+)
 
 type chunkedBodyParser struct {
 	callback 					OnBodyCallback
