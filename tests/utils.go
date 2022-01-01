@@ -5,7 +5,7 @@ import (
 )
 
 
-func FeedParser(parser *httpparser.HTTPRequestParser, data []byte, chunksSize int) error {
+func FeedParser(parser *httpparser.HTTPRequestParser, data []byte, chunksSize int) (completed bool, err error) {
 	for i := 0; i < len(data); i += chunksSize {
 		end := i + chunksSize
 
@@ -16,13 +16,13 @@ func FeedParser(parser *httpparser.HTTPRequestParser, data []byte, chunksSize in
 		completed, err := parser.Feed(data[i:end])
 
 		if err != nil {
-			return err
+			return completed, err
 		}
 
 		if completed {
-			return nil
+			return true, nil
 		}
 	}
 
-	return nil
+	return false, nil
 }
