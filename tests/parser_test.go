@@ -97,7 +97,7 @@ func expect(
 		return false, fmt.Sprintf("mismatching body length: expected %d, got %d",
 			expectedBodyLength, len(protocol.Body))
 	} else if string(protocol.Body) != expectBody {
-		return false, fmt.Sprintf("mismatching body: expected \"%s\", got \"%s\"",
+		return false, fmt.Sprintf(`mismatching body: expected "%s", got "%s"`,
 			expectBody, string(protocol.Body))
 	}
 
@@ -159,20 +159,80 @@ func TestOrdinaryGETRequestParseFull(t *testing.T) {
 	testOrdinaryGETRequestParse(t, -1)
 }
 
-func TestInvalidGETRequestMissingMethod(t *testing.T) {
+func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol)
+	completed, err := FeedParser(parser, request, 5)
 
-	ordinaryGetRequest := []byte("/ HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	completed, err := FeedParser(parser, ordinaryGetRequest, getChunkLength(5, ordinaryGetRequest))
-
-	if err == nil && !protocol.Completed {
+	if err != nil && err != errorWanted {
+		t.Errorf(`expected "%s" error, got "%s" instead`, errorWanted, err)
+	} else if err == nil && !protocol.Completed {
 		t.Error("parser didn't return an error and didn't mark request as completed")
 	} else if err == nil {
 		t.Error("parser didn't return an error")
 	} else if !completed {
 		t.Error("unexpected behaviour: parser doesn't mark request as completed")
 	}
+}
+
+func TestInvalidGETRequestMissingMethod(t *testing.T) {
+	request := []byte("/ HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.InvalidRequestData)
+}
+
+func TestInvalidPOSTRequestExtraBody(t *testing.T) {
+	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nContent-Length: 13\r\n\r\nHello, world! Extra body")
+	protocol := Protocol{}
+	parser := httpparser.NewHTTPRequestParser(&protocol)
+	completed, err := FeedParser(parser, request, 5)
+
+	if err != nil {
+		t.Errorf("unexpected error: %s", err)
+	} else if !completed {
+		t.Error("fed the whole request (and even more) but no completion mark")
+	}
+
+	wantedMethod := "POST"
+	wantedPath := "/"
+	wantedProtocol := "HTTP/1.1"
+	wantedHeaders := map[string]string {
+		"Host": "rush.dev",
+	}
+	bodyLenWanted := 13
+
+	succeeded, errmsg := expect(
+		protocol, wantedMethod, wantedPath,
+		wantedProtocol, wantedHeaders, bodyLenWanted,
+		"Hello, world!", false)
+
+	if !succeeded {
+		t.Error(errmsg)
+	}
+}
+
+func TestInvalidGETRequestUnknownProtocol(t *testing.T) {
+	request := []byte("GET / HTTP/1.2\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.InvalidRequestData)
+}
+
+func TestInvalidGETRequestEmptyPath(t *testing.T) {
+	request := []byte("GET  HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.InvalidRequestData)
+}
+
+func TestInvalidGETRequestMissingPath(t *testing.T) {
+	request := []byte("GET HTTP/1.2\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.RequestSyntaxError)
+}
+
+func TestInvalidGETRequestInvalidHeader(t *testing.T) {
+	request := []byte("GET / HTTP/1.1\r\nContent-Type some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.InvalidHeader)
+}
+
+func TestInvalidGETRequestNoSpaces(t *testing.T) {
+	request := []byte("GET/HTTP/1.1\r\nContent-Typesomecontenttype\r\nHost:rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.RequestSyntaxError)
 }
 
 func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
@@ -299,5 +359,85 @@ func TestChunkedTransferEncoding(t *testing.T) {
 
 	if !succeeded {
 		t.Error(errmsg)
+	}
+}
+
+func TestParserReuseAbility(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewHTTPRequestParser(&protocol)
+
+	request := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	completed, err := FeedParser(parser, request, 5)
+
+	if !completed {
+		t.Error("fed the whole request to parser, but no completion flag")
+	} else if err != nil {
+		t.Errorf("got unexpected error: %s", err)
+	}
+
+	protocol = Protocol{}
+	parser.Reuse(&protocol)
+
+	completed, err = FeedParser(parser, request, 5)
+
+	if !completed {
+		t.Error("fed the whole request to parser, but no completion flag")
+	} else if err != nil {
+		t.Errorf("got unexpected error: %s", err)
+	}
+}
+
+func TestParserReuseAbilityChunkedRequest(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewHTTPRequestParser(&protocol)
+
+	request := []byte("POST / HTTP/1.1\r\n" +
+		"Content-Type: some content type\n\r" +
+		"Host: rush.dev\r\n" +
+		"Transfer-Encoding: chunked\r\n" +
+		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
+	completed, err := FeedParser(parser, request, 5)
+
+	if !completed {
+		t.Error("fed the whole request to parser, but no completion flag")
+	} else if err != nil {
+		t.Errorf("got unexpected error: %s", err)
+	}
+
+	methodExpected := "POST"
+	pathExpected := "/"
+	protocolExpected := "HTTP/1.1"
+	headersExpected := map[string]string {
+		"Content-Type": "some content type",
+		"Host": "rush.dev",
+		"Transfer-Encoding": "chunked",
+	}
+	expectBody := "Hello, world!But what's wrong with you?Finally am here"
+
+	succeeded, errmsg := expect(protocol,
+		methodExpected, pathExpected, protocolExpected,
+		headersExpected, -1, expectBody, false)
+
+	if !succeeded {
+		t.Errorf("unexpected error before reuse: %s", errmsg)
+	}
+
+	protocol = Protocol{}
+	parser.Reuse(&protocol)
+
+	completed, err = FeedParser(parser, request, 5)
+
+	if !completed {
+		t.Error("fed the whole request to parser, but no completion flag")
+	} else if err != nil {
+		t.Errorf("got unexpected error: %s", err)
+	}
+
+	succeeded, errmsg = expect(protocol,
+		methodExpected, pathExpected, protocolExpected,
+		headersExpected, -1, expectBody, false)
+
+	if !succeeded {
+		t.Errorf("unexpected error after reuse: %s", errmsg)
 	}
 }
