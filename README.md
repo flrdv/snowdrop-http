@@ -24,7 +24,7 @@ Example of implemented protocol you can find [here](https://github.com/floordiv/
 # FAQ
 > *Q*: How does parser behave in case of chunked request?
 
-> *A*: OnBody() callback will be called. There are no guarantees that the whole chunk will be passed once, but may be only a part of actual chunk, depends on how much data will be fed
+> *A*: OnBody() callback will be called. Current chunked bodies parser isn't effective enough, so guaranteed that OnBody() callback will receive the whole chunk as it was sent. In future, this won't be guaranteed
 
 <br>
 
