@@ -2,9 +2,10 @@ package httpparser
 
 import (
 	"fmt"
-	"github.com/floordiv/snowdrop/src/httpparser"
 	"strings"
 	"testing"
+
+	"github.com/floordiv/snowdrop/src/httpparser"
 )
 
 
