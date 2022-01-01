@@ -85,6 +85,10 @@ func (parser *HTTPRequestParser) GetState() ParsingState {
 func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError error) {
 	if parser.currentState == MessageCompleted {
 		return true, nil
+	} else if len(data) + len(parser.tempBuf) > MaxBufLen {
+		parser.completeMessageNoCallback()
+
+		return true, BufferSizeExceeded
 	} else if parser.currentState == Body {
 		if parser.isChunkedRequest {
 			done, err := parser.bodyChunksParser.Feed(data)
@@ -115,6 +119,15 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 		}
 
 		if char != parser.currentSplitter {
+			if char == '\n' {
+				// hardcoded behaviour, but still
+				// newline before protocol state means invalid
+				// request body as it cannot be there due to rfc
+				parser.completeMessageNoCallback()
+
+				return true, RequestSyntaxError
+			}
+
 			parser.tempBuf = append(parser.tempBuf, char)
 
 			if parser.splitterState != Nothing {
@@ -160,7 +173,7 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 				}
 
 				return false, nil
-			} else if parser.currentState == Headers {
+			} else if char == '\n' && parser.currentState == Headers {
 				if err := parser.pushHeaderFromBuf(); err != nil {
 					parser.completeMessageNoCallback()
 
@@ -203,6 +216,12 @@ func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError
 			}
 
 			if char == '\n' {
+				if parser.splitterState == Method || parser.splitterState == Path {
+					parser.completeMessageNoCallback()
+
+					return true, RequestSyntaxError
+				}
+
 				parser.splitterState = ReceivedLF
 			}
 		}
@@ -296,5 +315,5 @@ func parseHeader(headersBytesString []byte) (key, value string, err error) {
 		}
 	}
 
-	return "", "", NoSplitterWasFound
+	return "", "", InvalidHeader
 }
