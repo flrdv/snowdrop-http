@@ -7,9 +7,9 @@ import (
 )
 
 
-var RequestSyntaxError = errors.New("request syntax error")
-var InvalidContentLengthValue = errors.New("invalid value for content-length header")
-var NoSplitterWasFound = errors.New("no splitter was found")
+var RequestSyntaxError 			= errors.New("request syntax error")
+var InvalidContentLengthValue 	= errors.New("invalid value for content-length header")
+var NoSplitterWasFound 			= errors.New("no splitter was found")
 
 var splittersTable = map[ParsingState]byte{
 	Method: 	' ',
@@ -46,6 +46,21 @@ type HTTPRequestParser struct {
 
 	isChunkedRequest	bool
 	bodyChunksParser 	*chunkedBodyParser
+}
+
+func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
+	parser := HTTPRequestParser{
+		protocol: 			protocol,
+		splitterState:  	Nothing,
+		currentState: 		Method,
+		currentSplitter: 	splittersTable[Method],
+		tempBuf: 			make([]byte, 0, MaxBufLen),
+		isChunkedRequest: 	false,
+		bodyChunksParser: 	NewChunkedBodyParser(protocol.OnBody),
+	}
+	protocol.OnMessageBegin()
+
+	return &parser
 }
 
 func (parser *HTTPRequestParser) Reuse(protocol IProtocol) {
@@ -224,22 +239,6 @@ func (parser *HTTPRequestParser) pushHeaderFromBuf() (err error) {
 	}
 
 	return nil
-}
-
-
-func NewHTTPRequestParser(protocol IProtocol) *HTTPRequestParser {
-	parser := HTTPRequestParser{
-		protocol: 			protocol,
-		splitterState:  	Nothing,
-		currentState: 		Method,
-		currentSplitter: 	splittersTable[Method],
-		tempBuf: 			make([]byte, 0, MaxBufLen),
-		isChunkedRequest: 	false,
-		bodyChunksParser: 	NewChunkedBodyParser(protocol.OnBody),
-	}
-	protocol.OnMessageBegin()
-
-	return &parser
 }
 
 func parseHeader(headersBytesString []byte) (key, value string, err error) {
