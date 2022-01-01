@@ -34,6 +34,16 @@ type chunkedBodyParser struct {
 	chunksReceived				int
 }
 
+func NewChunkedBodyParser(callback OnBodyCallback) *chunkedBodyParser {
+	return &chunkedBodyParser{
+		callback:                  callback,
+		state:                     ExpectingChunkLength,
+		currentChunkLength:        0,
+		tempBuf:                   make([]byte, 0, MaxChunkSize),
+		chunksReceived:            0,
+	}
+}
+
 func (p *chunkedBodyParser) Reuse(callback OnBodyCallback) {
 	p.callback = callback
 	p.state = ExpectingChunkLength
@@ -95,16 +105,12 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, chunkErr error) {
 	return false, nil
 }
 
-func NewChunkedBodyParser(callback OnBodyCallback) *chunkedBodyParser {
-	return &chunkedBodyParser{
-		callback:                  callback,
-		state:                     ExpectingChunkLength,
-		currentChunkLength:        0,
-		tempBuf:                   make([]byte, 0, MaxChunkSize),
-		chunksReceived:            0,
-	}
-}
-
 func quote(data []byte) string {
+	/*
+	Isn't removed yet as sometimes I need this for debug
+
+	Don't ask me why I'm not using debugger. Once I used,
+	an it fucked up my videodriver. I don't wanna try again
+	 */
 	return strconv.Quote(string(data))
 }
