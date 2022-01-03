@@ -84,7 +84,7 @@ func (parser *HTTPRequestParser) GetState() ParsingState {
 
 func (parser *HTTPRequestParser) Feed(data []byte) (completed bool, requestError error) {
 	if parser.currentState == MessageCompleted {
-		return true, nil
+		parser.Reuse(parser.protocol)
 	} else if len(data) + len(parser.tempBuf) > MaxBufLen {
 		parser.completeMessageNoCallback()
 
