@@ -1,11 +1,10 @@
 package httpparser
 
-import (
-	"github.com/floordiv/snowdrop/src/httpparser"
-)
+type iparser interface{
+	Feed([]byte) (bool, []byte, error)
+}
 
-
-func FeedParser(parser *httpparser.HTTPRequestParser, data []byte, chunksSize int) (completed bool, err error) {
+func FeedParser(parser iparser, data []byte, chunksSize int) (completed bool, err error) {
 	for i := 0; i < len(data); i += chunksSize {
 		end := i + chunksSize
 
@@ -13,7 +12,7 @@ func FeedParser(parser *httpparser.HTTPRequestParser, data []byte, chunksSize in
 			end = len(data)
 		}
 
-		completed, err := parser.Feed(data[i:end])
+		completed, _, err  = parser.Feed(data[i:end])
 
 		if err != nil {
 			return completed, err
