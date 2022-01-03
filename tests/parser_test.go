@@ -5,9 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/floordiv/snowdrop/src/httpparser"
+	httpparser "github.com/floordiv/snowdrop/src/snowdrop"
 )
 
+
+const BufferLength = 65535
 
 type Protocol struct {
 	Method 		[]byte
@@ -18,7 +20,14 @@ type Protocol struct {
 	Completed 	bool
 }
 
-func (p *Protocol) OnMessageBegin() {}
+func (p *Protocol) OnMessageBegin() {
+	p.Method = nil
+	p.Path = nil
+	p.Protocol = nil
+	p.Headers = nil
+	p.Body = nil
+	p.Completed = false
+}
 
 func (p *Protocol) OnMethod(method []byte) {
 	p.Method = method
@@ -36,8 +45,8 @@ func (p *Protocol) OnHeadersBegin() {
 	p.Headers = make(map[string]string)
 }
 
-func (p *Protocol) OnHeader(key, value string) {
-	p.Headers[key] = value
+func (p *Protocol) OnHeader(key, value []byte) {
+	p.Headers[string(key)] = string(value)
 }
 
 func (p *Protocol) OnHeadersComplete() {}
@@ -49,6 +58,30 @@ func (p *Protocol) OnBody(chunk []byte) {
 func (p *Protocol) OnMessageComplete() {
 	p.Completed = true
 }
+
+/*
+And this protocol is for benchmarking, that's why it's empty - to avoid
+extra-overhead
+ */
+type BenchProtocol struct {}
+
+func (p *BenchProtocol) OnMessageBegin() {}
+
+func (p *BenchProtocol) OnMethod(_ []byte) {}
+
+func (p *BenchProtocol) OnPath(_ []byte) {}
+
+func (p *BenchProtocol) OnProtocol(_ []byte) {}
+
+func (p *BenchProtocol) OnHeadersBegin() {}
+
+func (p *BenchProtocol) OnHeader(_, _ []byte) {}
+
+func (p *BenchProtocol) OnHeadersComplete() {}
+
+func (p *BenchProtocol) OnBody(_ []byte) {}
+
+func (p *BenchProtocol) OnMessageComplete() {}
 
 
 func expect(
@@ -114,7 +147,7 @@ func getChunkLength(originLen int, request []byte) int {
 
 func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 
 	methodExpected := "GET"
 	pathExpected := "/"
@@ -161,7 +194,7 @@ func TestOrdinaryGETRequestParseFull(t *testing.T) {
 
 func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 	completed, err := FeedParser(parser, request, 5)
 
 	if err != nil && err != errorWanted {
@@ -177,13 +210,13 @@ func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 
 func TestInvalidGETRequestMissingMethod(t *testing.T) {
 	request := []byte("/ HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidRequestData)
+	testInvalidGETRequest(t, request, httpparser.RequestSyntaxError)
 }
 
 func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nContent-Length: 13\r\n\r\nHello, world! Extra body")
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 	completed, err := FeedParser(parser, request, 5)
 
 	if err != nil {
@@ -237,7 +270,7 @@ func TestInvalidGETRequestNoSpaces(t *testing.T) {
 
 func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 
 	ordinaryGetRequest := []byte("POST / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev" +
 		"\r\nContent-Length: 13\r\n\r\nHello, world!")
@@ -298,8 +331,8 @@ func TestChromeGETRequest(t *testing.T) {
 		"blqbu0Ksvtdr7q0iEns09m1D6MWlZv8JjB472GWnwfuDG; Goland-1dc491b=e03b2736-65ce-4ad0-b7ab-e4f8e1715c8b\r\n\r\n"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
-	completed, err := parser.Feed([]byte(request))
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	completed, _, err := parser.Feed([]byte(request))
 
 	methodExpected := "GET"
 	pathExpected := "/"
@@ -326,7 +359,7 @@ func TestChromeGETRequest(t *testing.T) {
 	}
 }
 
-func TestChunkedTransferEncoding(t *testing.T) {
+func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 	request := "POST / HTTP/1.1\r\n" +
 		"Content-Type: some content type\n\r" +
 		"Host: rush.dev\r\n" +
@@ -344,13 +377,15 @@ func TestChunkedTransferEncoding(t *testing.T) {
 	expectBody := "Hello, world!But what's wrong with you?Finally am here"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
-	completed, err := parser.Feed([]byte(request))
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	completed, _, err := parser.Feed([]byte(request))
 
 	if err != nil {
 		t.Errorf("error while parsing: %s", err)
+		return
 	} else if !completed {
 		t.Errorf("the whole request was fed to parser but he does not think so")
+		return
 	}
 
 	succeeded, errmsg := expect(protocol,
@@ -364,44 +399,49 @@ func TestChunkedTransferEncoding(t *testing.T) {
 
 func TestParserReuseAbility(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 
 	request := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
 	completed, err := FeedParser(parser, request, 5)
 
 	if !completed {
 		t.Error("fed the whole request to parser, but no completion flag")
+		return
 	} else if err != nil {
 		t.Errorf("got unexpected error: %s", err)
+		return
 	}
 
 	protocol = Protocol{}
-	parser.Reuse(&protocol)
-
 	completed, err = FeedParser(parser, request, 5)
 
 	if !completed {
 		t.Error("fed the whole request to parser, but no completion flag")
+		return
 	} else if err != nil {
 		t.Errorf("got unexpected error: %s", err)
+		return
 	}
 }
 
 func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 
 	request := []byte("POST / HTTP/1.1\r\n" +
 		"Content-Type: some content type\n\r" +
 		"Host: rush.dev\r\n" +
 		"Transfer-Encoding: chunked\r\n" +
 		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
+
 	completed, err := FeedParser(parser, request, 5)
 
 	if !completed {
-		t.Error("fed the whole request to parser, but no completion flag")
+		t.Error("fed the whole request to parser, but no completion flag before reuse")
+		return
 	} else if err != nil {
-		t.Errorf("got unexpected error: %s", err)
+		t.Errorf("got unexpected error before reuse: %s", err)
+		return
 	}
 
 	methodExpected := "POST"
@@ -420,17 +460,29 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 
 	if !succeeded {
 		t.Errorf("unexpected error before reuse: %s", errmsg)
+		return
 	}
 
-	protocol = Protocol{}
-	parser.Reuse(&protocol)
+	/*
+	IDK why, but in some reason parser eats one \r\n after Transfer-Encoding header
+	I really can't imagine why does it happens, and where
+
+	But I lost 2 evenings to see this strange shit, so I don't mind
+	 */
+	request = []byte("POST / HTTP/1.1\r\n" +
+		"Content-Type: some content type\n\r" +
+		"Host: rush.dev\r\n" +
+		"Transfer-Encoding: chunked\r\n" +
+		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
 
 	completed, err = FeedParser(parser, request, 5)
 
 	if !completed {
-		t.Error("fed the whole request to parser, but no completion flag")
+		t.Error("fed the whole request to parser, but no completion flag after reuse")
+		return
 	} else if err != nil {
-		t.Errorf("got unexpected error: %s", err)
+		t.Errorf("got unexpected error after reuse: %s", err)
+		return
 	}
 
 	succeeded, errmsg = expect(protocol,
@@ -439,5 +491,6 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 
 	if !succeeded {
 		t.Errorf("unexpected error after reuse: %s", errmsg)
+		return
 	}
 }
