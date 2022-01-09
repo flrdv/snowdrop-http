@@ -54,7 +54,7 @@ func divideBytes(data []byte, n int) [][]byte {
 func BenchmarkSimpleGETRequestBy1CharOLDPARSER(b *testing.B) {
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol)
-	chars := divideBytes(request, 1)
+	chars := divideBytes(smallGetRequest, 1)
 
 	b.ResetTimer()
 
@@ -86,6 +86,6 @@ func BenchmarkSimpleGETRequestFullOLDPARSER(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		parser.Feed(request)
+		parser.Feed(smallGetRequest)
 	}
 }
