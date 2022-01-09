@@ -306,18 +306,6 @@ func parseHeader(headersString string) (key, value string, err error) {
 	return "", "", InvalidHeader
 }
 
-func collapseByteArrays(base []byte, arrays ...[]byte) []byte {
-	if len(arrays) == 0 {
-		return base
-	}
-
-	for _, arr := range arrays[1:] {
-		base = append(base, arr...)
-	}
-
-	return base
-}
-
 // snippet: https://github.com/valyala/fasthttp/blob/017f0aa09d7fd802bd1760836e329734ea642180/bytesconv.go#L342
 // I just a bit corrected it, as I need not s2b, but b2s
 //
@@ -335,11 +323,3 @@ func B2S(s []byte) (b string) {
 
 	return b
 }
-
-/*func printArrs(data [][]byte) {
-	for _, arr := range data {
-		fmt.Print(quote(arr), " ")
-	}
-
-	fmt.Println()
-}*/
