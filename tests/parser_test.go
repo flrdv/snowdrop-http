@@ -2,6 +2,7 @@ package httpparser
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,32 +13,26 @@ import (
 const BufferLength = 65535
 
 type Protocol struct {
-	Method 		[]byte
-	Path 		[]byte
-	Protocol 	[]byte
-	Headers 	map[string]string
-	Body 		[]byte
-	Completed 	bool
+	Method 			string
+	Path 			string
+	Protocol 		string
+	Headers 		map[string]string
+	Body 			[]byte
+	Completed 		bool
+	CompletedTimes  int
 }
 
-func (p *Protocol) OnMessageBegin() {
-	p.Method = nil
-	p.Path = nil
-	p.Protocol = nil
-	p.Headers = nil
-	p.Body = nil
-	p.Completed = false
-}
+func (p *Protocol) OnMessageBegin() {}
 
-func (p *Protocol) OnMethod(method []byte) {
+func (p *Protocol) OnMethod(method string) {
 	p.Method = method
 }
 
-func (p *Protocol) OnPath(path []byte) {
+func (p *Protocol) OnPath(path string) {
 	p.Path = path
 }
 
-func (p *Protocol) OnProtocol(proto []byte) {
+func (p *Protocol) OnProtocol(proto string) {
 	p.Protocol = proto
 }
 
@@ -45,8 +40,8 @@ func (p *Protocol) OnHeadersBegin() {
 	p.Headers = make(map[string]string)
 }
 
-func (p *Protocol) OnHeader(key, value []byte) {
-	p.Headers[string(key)] = string(value)
+func (p *Protocol) OnHeader(key, value string) {
+	p.Headers[key] = value
 }
 
 func (p *Protocol) OnHeadersComplete() {}
@@ -57,6 +52,7 @@ func (p *Protocol) OnBody(chunk []byte) {
 
 func (p *Protocol) OnMessageComplete() {
 	p.Completed = true
+	p.CompletedTimes++
 }
 
 /*
@@ -83,8 +79,11 @@ func (p *BenchProtocol) OnBody(_ []byte) {}
 
 func (p *BenchProtocol) OnMessageComplete() {}
 
+func quote(data []byte) string {
+	return strconv.Quote(string(data))
+}
 
-func expect(
+func want(
 	protocol Protocol,
 	expectedMethod, expectedPath, expectedProtocolString string,
 	headers map[string]string,
@@ -94,15 +93,15 @@ func expect(
 
 	if string(protocol.Method) != expectedMethod {
 		return false, fmt.Sprintf("expected method %s, got %s instead",
-			string(protocol.Method), expectedMethod)
+			expectedMethod, protocol.Method)
 	}
 	if string(protocol.Path) != expectedPath {
 		return false, fmt.Sprintf("expected path %s, got %s instead",
-			string(protocol.Path), expectedPath)
+			expectedPath, protocol.Path)
 	}
 	if string(protocol.Protocol) != expectedProtocolString {
 		return false, fmt.Sprintf("expected protocol %s, got %s instead",
-			string(protocol.Protocol), expectedProtocolString)
+			expectedProtocolString, protocol.Protocol)
 	}
 
 	for key, value := range headers {
@@ -114,7 +113,7 @@ func expect(
 
 		if !found {
 			if strictHeadersCheck {
-				return false, fmt.Sprintf("unexpected header: %s", key)
+				return false, fmt.Sprintf("unexpected header: %s", strconv.Quote(key))
 			} else {
 				continue
 			}
@@ -122,7 +121,7 @@ func expect(
 
 		if expectedValue != value {
 			return false, fmt.Sprintf("%s: values are mismatching (expected %s, got %s)",
-				key, expectedValue, value)
+				strconv.Quote(key), strconv.Quote(expectedValue), strconv.Quote(value))
 		}
 	}
 
@@ -131,18 +130,10 @@ func expect(
 			expectedBodyLength, len(protocol.Body))
 	} else if string(protocol.Body) != expectBody {
 		return false, fmt.Sprintf(`mismatching body: expected "%s", got "%s"`,
-			expectBody, string(protocol.Body))
+			expectBody, quote(protocol.Body))
 	}
 
 	return true, ""
-}
-
-func getChunkLength(originLen int, request []byte) int {
-	if originLen == -1 {
-		return len(request)
-	}
-
-	return originLen
 }
 
 func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
@@ -159,15 +150,22 @@ func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 	bodyLenExpected := 0
 
 	ordinaryGetRequest := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	_, err := FeedParser(parser, ordinaryGetRequest, getChunkLength(chunkSize, ordinaryGetRequest))
+
+	if chunkSize == -1 {
+		chunkSize = len(ordinaryGetRequest) + 1
+	}
+
+	err := FeedParser(parser, ordinaryGetRequest, chunkSize)
 
 	if err != nil {
 		t.Errorf("parser returned error: %s\n", err)
-	} else if !protocol.Completed {
+		return
+	} else if protocol.CompletedTimes != 1 {
 		t.Error("the whole request was fed to parser but he does not think so")
+		return
 	}
 
-	succeeded, errmsg := expect(protocol,
+	succeeded, errmsg := want(protocol,
 		methodExpected, pathExpected, protocolExpected,
 		headersExpected, bodyLenExpected, "", true)
 
@@ -195,16 +193,14 @@ func TestOrdinaryGETRequestParseFull(t *testing.T) {
 func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
-	completed, err := FeedParser(parser, request, 5)
+	err := FeedParser(parser, request, 5)
 
 	if err != nil && err != errorWanted {
 		t.Errorf(`expected "%s" error, got "%s" instead`, errorWanted, err)
-	} else if err == nil && !protocol.Completed {
+	} else if err == nil && protocol.CompletedTimes != 1 {
 		t.Error("parser didn't return an error and didn't mark request as completed")
 	} else if err == nil {
 		t.Error("parser didn't return an error")
-	} else if !completed {
-		t.Error("unexpected behaviour: parser doesn't mark request as completed")
 	}
 }
 
@@ -217,12 +213,14 @@ func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nContent-Length: 13\r\n\r\nHello, world! Extra body")
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
-	completed, err := FeedParser(parser, request, 5)
+	err := FeedParser(parser, request, 5)
 
 	if err != nil {
 		t.Errorf("unexpected error: %s", err)
-	} else if !completed {
+		return
+	} else if !protocol.Completed {
 		t.Error("fed the whole request (and even more) but no completion mark")
+		return
 	}
 
 	wantedMethod := "POST"
@@ -233,7 +231,7 @@ func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	}
 	bodyLenWanted := 13
 
-	succeeded, errmsg := expect(
+	succeeded, errmsg := want(
 		protocol, wantedMethod, wantedPath,
 		wantedProtocol, wantedHeaders, bodyLenWanted,
 		"Hello, world!", false)
@@ -285,15 +283,21 @@ func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	}
 	bodyLenExpected := 13
 
-	_, err := FeedParser(parser, ordinaryGetRequest, getChunkLength(chunkSize, ordinaryGetRequest))
+	if chunkSize == -1 {
+		chunkSize = len(ordinaryGetRequest)
+	}
+
+	err := FeedParser(parser, ordinaryGetRequest, chunkSize)
 
 	if err != nil {
 		t.Errorf("parser returned error: %s\n", err)
+		return
 	} else if !protocol.Completed {
 		t.Error("the whole request was fed to parser but he does not think so")
+		return
 	}
 
-	succeeded, errmsg := expect(protocol,
+	succeeded, errmsg := want(protocol,
 		methodExpected, pathExpected, protocolExpected,
 		headersExpected, bodyLenExpected, "Hello, world!", true)
 
@@ -328,11 +332,11 @@ func TestChromeGETRequest(t *testing.T) {
 		"application/signed-exchange;v=b3;q=0.9\r\nSec-Fetch-Site: none\r\nSec-Fetch-Mode: navigate" +
 		"\r\nSec-Fetch-User: ?1\r\nSec-Fetch-Dest: document\r\nAccept-Encoding: gzip, deflate, br" +
 		"\r\nAccept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7,uk;q=0.6\r\nCookie: csrftoken=y1y3SinAMbiYy7yn9Oc" +
-		"blqbu0Ksvtdr7q0iEns09m1D6MWlZv8JjB472GWnwfuDG; Goland-1dc491b=e03b2736-65ce-4ad0-b7ab-e4f8e1715c8b\r\n\r\n"
+		"blqbudgdgdgdgddgdgdgdgdsgsdgsdgdgddgdGWnwfuDG; Goland-1dc491b=e03b2dgdgvdfgad0-b7ab-e4f8e1715c8b\r\n\r\n"
 
 	protocol := Protocol{}
 	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
-	completed, _, err := parser.Feed([]byte(request))
+	err := parser.Feed([]byte(request))
 
 	methodExpected := "GET"
 	pathExpected := "/"
@@ -346,51 +350,13 @@ func TestChromeGETRequest(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("error while parsing: %s", err)
-	} else if !completed {
+	} else if !protocol.Completed {
 		t.Errorf("the whole request was fed to parser but he does not think so")
 	}
 
-	succeeded, errmsg := expect(protocol,
+	succeeded, errmsg := want(protocol,
 		methodExpected, pathExpected, protocolExpected,
 		headersExpected, bodyLenExpected, "", false)
-
-	if !succeeded {
-		t.Error(errmsg)
-	}
-}
-
-func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
-	request := "POST / HTTP/1.1\r\n" +
-		"Content-Type: some content type\n\r" +
-		"Host: rush.dev\r\n" +
-		"Transfer-Encoding: chunked\r\n" +
-		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n"
-
-	methodExpected := "POST"
-	pathExpected := "/"
-	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
-		"Content-Type": "some content type",
-		"Host": "rush.dev",
-		"Transfer-Encoding": "chunked",
-	}
-	expectBody := "Hello, world!But what's wrong with you?Finally am here"
-
-	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
-	completed, _, err := parser.Feed([]byte(request))
-
-	if err != nil {
-		t.Errorf("error while parsing: %s", err)
-		return
-	} else if !completed {
-		t.Errorf("the whole request was fed to parser but he does not think so")
-		return
-	}
-
-	succeeded, errmsg := expect(protocol,
-		methodExpected, pathExpected, protocolExpected,
-		headersExpected, -1, expectBody, false)
 
 	if !succeeded {
 		t.Error(errmsg)
@@ -402,9 +368,9 @@ func TestParserReuseAbility(t *testing.T) {
 	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
 
 	request := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	completed, err := FeedParser(parser, request, 5)
+	err := FeedParser(parser, request, 5)
 
-	if !completed {
+	if !protocol.Completed {
 		t.Error("fed the whole request to parser, but no completion flag")
 		return
 	} else if err != nil {
@@ -413,84 +379,13 @@ func TestParserReuseAbility(t *testing.T) {
 	}
 
 	protocol = Protocol{}
-	completed, err = FeedParser(parser, request, 5)
+	err = FeedParser(parser, request, 5)
 
-	if !completed {
+	if !protocol.Completed {
 		t.Error("fed the whole request to parser, but no completion flag")
 		return
 	} else if err != nil {
 		t.Errorf("got unexpected error: %s", err)
-		return
-	}
-}
-
-func TestParserReuseAbilityChunkedRequest(t *testing.T) {
-	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
-
-	request := []byte("POST / HTTP/1.1\r\n" +
-		"Content-Type: some content type\n\r" +
-		"Host: rush.dev\r\n" +
-		"Transfer-Encoding: chunked\r\n" +
-		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
-
-	completed, err := FeedParser(parser, request, 5)
-
-	if !completed {
-		t.Error("fed the whole request to parser, but no completion flag before reuse")
-		return
-	} else if err != nil {
-		t.Errorf("got unexpected error before reuse: %s", err)
-		return
-	}
-
-	methodExpected := "POST"
-	pathExpected := "/"
-	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
-		"Content-Type": "some content type",
-		"Host": "rush.dev",
-		"Transfer-Encoding": "chunked",
-	}
-	expectBody := "Hello, world!But what's wrong with you?Finally am here"
-
-	succeeded, errmsg := expect(protocol,
-		methodExpected, pathExpected, protocolExpected,
-		headersExpected, -1, expectBody, false)
-
-	if !succeeded {
-		t.Errorf("unexpected error before reuse: %s", errmsg)
-		return
-	}
-
-	/*
-	IDK why, but in some reason parser eats one \r\n after Transfer-Encoding header
-	I really can't imagine why does it happens, and where
-
-	But I lost 2 evenings to see this strange shit, so I don't mind
-	 */
-	request = []byte("POST / HTTP/1.1\r\n" +
-		"Content-Type: some content type\n\r" +
-		"Host: rush.dev\r\n" +
-		"Transfer-Encoding: chunked\r\n" +
-		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
-
-	completed, err = FeedParser(parser, request, 5)
-
-	if !completed {
-		t.Error("fed the whole request to parser, but no completion flag after reuse")
-		return
-	} else if err != nil {
-		t.Errorf("got unexpected error after reuse: %s", err)
-		return
-	}
-
-	succeeded, errmsg = expect(protocol,
-		methodExpected, pathExpected, protocolExpected,
-		headersExpected, -1, expectBody, false)
-
-	if !succeeded {
-		t.Errorf("unexpected error after reuse: %s", errmsg)
 		return
 	}
 }
