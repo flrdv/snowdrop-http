@@ -11,7 +11,8 @@ const (
 	MethodPathProtocol
 	Headers
 	Body
-	MessageCompleted
+
+	Dead
 )
 
 const (
