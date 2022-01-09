@@ -1,10 +1,10 @@
 package httpparser
 
 type iparser interface{
-	Feed([]byte) (bool, []byte, error)
+	Feed([]byte) error
 }
 
-func FeedParser(parser iparser, data []byte, chunksSize int) (completed bool, err error) {
+func FeedParser(parser iparser, data []byte, chunksSize int) error {
 	for i := 0; i < len(data); i += chunksSize {
 		end := i + chunksSize
 
@@ -12,16 +12,16 @@ func FeedParser(parser iparser, data []byte, chunksSize int) (completed bool, er
 			end = len(data)
 		}
 
-		completed, _, err  = parser.Feed(data[i:end])
+		rawPiece := data[i:end]
+		piece := make([]byte, len(rawPiece))
+		copy(piece, rawPiece)
+
+		err := parser.Feed(piece)
 
 		if err != nil {
-			return completed, err
-		}
-
-		if completed {
-			return true, nil
+			return err
 		}
 	}
 
-	return false, nil
+	return nil
 }
