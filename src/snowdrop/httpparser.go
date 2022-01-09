@@ -2,34 +2,38 @@ package snowdrop
 
 import (
 	"bytes"
-	"fmt"
+	"reflect"
 	"strconv"
+	"strings"
+	"unsafe"
 )
 
 const DefaultBufferLength = 65535
+const (
+	space 			 = " "
+	contentLength 	 = "content-length"
+	transferEncoding = "transfer-encoding"
+	chunked 		 = "chunked"
+)
 var (
-	space 			 = []byte(" ")
 	cr				 = []byte("\r")
 	lf 		 		 = []byte("\n")
-	contentLength 	 = []byte("content-length")
-	transferEncoding = []byte("transfer-encoding")
-	chunked 		 = []byte("chunked")
 )
 
 /*
 In reversed order because newer are more often than older
  */
-var SupportedProtocols = [][]byte{
-	[]byte("HTTP/1.1"), []byte("HTTP/1.0"), []byte("HTTP/0.9"),
+var SupportedProtocols = []string{
+	"HTTP/1.1", "HTTP/1.0", "HTTP/0.9",
 }
 
 type IProtocol interface {
 	OnMessageBegin()
-	OnMethod([]byte)
-	OnPath([]byte)
-	OnProtocol([]byte)
+	OnMethod(string)
+	OnPath(string)
+	OnProtocol(string)
 	OnHeadersBegin()
-	OnHeader([]byte, []byte)
+	OnHeader(string, string)
 	OnHeadersComplete()
 	OnBody([]byte)
 	OnMessageComplete()
@@ -54,18 +58,20 @@ func NewHTTPRequestParser(protocol IProtocol, maxBufferLength int) *httpRequestP
 		maxBufferLength = DefaultBufferLength
 	}
 
+	protocol.OnMessageBegin()
+
 	return &httpRequestParser{
 		protocol: protocol,
 		buffer: make([]byte, 0, maxBufferLength),
 		chunksParser: newChunkedBodyParser(protocol.OnBody),
 		maxBufferLength: maxBufferLength,
-		state: MessageBegin,
+		state: MethodPathProtocol,
 	}
 }
 
 func (p *httpRequestParser) Clear() {
 	p.state = MethodPathProtocol
-	p.buffer = nil
+	p.buffer = p.buffer[:0]
 	p.contentLength = 0
 	p.bodyBytesReceived = 0
 	p.isChunked = false
@@ -74,144 +80,69 @@ func (p *httpRequestParser) Clear() {
 	p.protocol.OnMessageBegin()
 }
 
-func (p *httpRequestParser) Feed(data []byte) (requestCompleted bool, extraBytes []byte, requestError error) {
-	if p.state == MessageCompleted {
-		p.Clear()
-	}
+func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
+	/*
+	This parser is absolutely stand-alone. It's like a separated sub-system in every
+	server, because everything you need is just to feed it
+	 */
 
 	if len(data) == 0 {
-		return false, nil, nil
+		return nil
 	}
 
 	switch p.state {
-	case MessageBegin:
-		p.protocol.OnMessageBegin()
-		p.state = MethodPathProtocol
-	case Body:
-		if len(p.buffer) > 0 {
-			data = append(p.buffer, data...)
-			p.buffer = nil
-		}
-
-		requestCompleted, extraBytes, requestError = p.pushBodyPeace(data)
-
-		if requestCompleted {
-			// OnMessageComplete is called only in case of correct request
-			// if any error occurred during parsing - it won't be called
-			p.completeRequest(requestError == nil)
-
-
-			return true, extraBytes, requestError
-		} else if requestError != nil {
-			p.completeRequest(false)
-
-			return true, nil, requestError
-		}
-
-		return false, nil, requestError
-	case MessageCompleted:
-		p.Clear()
+	case Dead: return ParserIsDead
+	case Body: return p.pushBodyPiece(data)
 	}
 
-	foodLines := bytes.Split(data, lf)
+	lfCount := bytes.Count(data, lf)
 
-	if len(foodLines) == 1 {
-		nonCompletedLine := foodLines[0]
-
-		if len(p.buffer)+len(nonCompletedLine) >= p.maxBufferLength {
-			p.buffer = nil
-			p.completeRequest(false)
-
-			return true, nil, BufferSizeExceeded
+	if lfCount == 0 {
+		if len(p.buffer) + len(data) >= p.maxBufferLength {
+			return BufferSizeExceeded
 		}
 
-		p.buffer = append(p.buffer, nonCompletedLine...)
+		p.buffer = append(p.buffer, data...)
 
-		return false, nil, nil
+		return nil
 	}
 
 	if len(p.buffer) > 0 {
-		// if we finally have some LF, but also something in
-		// buffer, we need to push this something from buffer
-		// to processing data
-		foodLines[0] = append(p.buffer, foodLines[0]...)
-		p.buffer = nil
+		// after everything, we finally can append our non-empty buffer
+		// and make it empty
+		data = append(p.buffer, data...)
+		p.buffer = p.buffer[:0]
 	}
 
-	lastFoodPeaceLen := len(foodLines[len(foodLines)-1])
+	lfIndex := bytes.IndexByte(data, '\n')
 
-	if lastFoodPeaceLen > 0 {
-		// at this point buffer is always empty
-		p.buffer = foodLines[len(foodLines)-1]
-		foodLines = foodLines[:len(foodLines)-1]
-	} else if lastFoodPeaceLen == 0 {
-		foodLines = foodLines[:len(foodLines)-1]
-	}
+	for i := 0; i < lfCount; i++ {
+		p.state, reqErr = p.parseAndGetNextState(bytes.TrimSuffix(data[:lfIndex], cr))
 
-	for index, line := range foodLines {
-		p.state, extraBytes, requestError = p.parseAndGetNextState(bytes.TrimSuffix(line, cr))
-
-		if p.state == MessageCompleted {
-			p.completeRequest(requestError == nil)
-
-			if index + 1 < len(foodLines) {
-				extraBytes = collapseByteArrays(extraBytes, foodLines[index+1:]...)
-			}
-
-			return true, extraBytes, requestError
-		} else if p.state == Body && p.isChunked {
-			// as chunks has a bit different logic, we have to rely on
-			// chunked body parser, as otherwise we may trap in a shit
-			// like buffer overflow (or near to overflow, smbd may raise
-			// a memory leak keeping connection opened & keeping 65534
-			// bytes sent, for example)
-
-			foodLen := len(foodLines)
-
-			if index + 1 < foodLen {
-				dataPiece := bytes.TrimSuffix(foodLines[index], cr)
-
-				for _, arr := range foodLines[index+1:] {
-					dataPiece = append(dataPiece, append(arr, lf...)...)
-				}
-
-				//fmt.Println("wanna feed:", quote(append(dataPiece, p.buffer...)))
-				requestCompleted, requestError = p.chunksParser.Feed(append(dataPiece, p.buffer...))
-
-				if requestCompleted {
-					p.completeRequest(requestError == nil)
-				}
-
-				p.buffer = nil
-
-				return requestCompleted, nil, requestError
-			}
-
-			return p.state == MessageCompleted, nil, nil
-		}
-	}
-
-	if p.state == Body && len(p.buffer) > 0 {
-		requestCompleted, extraBytes, requestError = p.pushBodyPeace(p.buffer)
-		p.buffer = nil
-
-		if requestCompleted {
-			p.completeRequest(requestError == nil)
+		if reqErr != nil {
+			return reqErr
 		}
 
-		return requestCompleted, extraBytes, requestError
+		data = data[lfIndex+1:]
+		lfIndex = bytes.IndexByte(data, '\n')
 	}
 
-	return false, nil, nil
+	if p.state == Body {
+		return p.pushBodyPiece(data)
+	}
+
+	p.buffer = data
+
+	return nil
 }
 
-func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingState, extraBytes []byte, err error) {
+func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingState, err error) {
 	switch p.state {
 	case MethodPathProtocol:
-		method, path, protocol, err := parseMethodPathProtocolState(data)
+		method, path, protocol, err := parseMethodPathProtocolState(B2S(data))
 
 		if err != nil {
-			return MessageCompleted, nil, err
+			return Dead, err
 		}
 
 		p.protocol.OnMethod(method)
@@ -219,50 +150,46 @@ func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingS
 		p.protocol.OnProtocol(protocol)
 		p.protocol.OnHeadersBegin()
 
-		return Headers, extraBytes, nil
+		return Headers, nil
 	case Headers:
 		if len(data) == 0 {
 			p.protocol.OnHeadersComplete()
 
 			if p.contentLength == 0 && !p.isChunked {
-				return MessageCompleted, nil, nil
+				p.completeRequest()
+				p.Clear()
+
+				return MethodPathProtocol, nil
 			}
 
-			return Body, nil, nil
+			return Body, nil
 		}
 
-		if err := p.pushHeader(data); err != nil {
-			return MessageCompleted, nil, err
+		if err = p.pushHeader(B2S(data)); err != nil {
+			return Dead, err
 		}
 
-		return Headers, nil, nil
+		return Headers, nil
 	case Body:
-		requestCompleted, extra, err := p.pushBodyPeace(data)
-
-		if requestCompleted {
-			return MessageCompleted, extra, err
-		}
-
-		return Body, nil, err
+		return Body, p.pushBodyPiece(data)
 	}
 
 	// this error must never be returned as may occur only in case
 	// if current state is MessageBegin, MessageComplete, or some
 	// unknown
-	return MessageCompleted, nil, RequestSyntaxError
+	return Dead, RequestSyntaxError
 }
 
-func (p *httpRequestParser) completeRequest(callback bool) {
-	if callback {
-		p.protocol.OnMessageComplete()
-	}
-
-	p.state = MessageCompleted
+func (p *httpRequestParser) completeRequest() {
+	/*
+	Not setting state to MethodPathProtocol, because this is a work of Clear() method,
+	that is expected to be called after this method
+	 */
+	p.protocol.OnMessageComplete()
 }
 
-func (p *httpRequestParser) pushHeader(rawHeader []byte) error {
+func (p *httpRequestParser) pushHeader(rawHeader string) error {
 	key, value, err := parseHeader(rawHeader)
-	key = bytes.ToLower(key)
 
 	if err != nil {
 		return err
@@ -271,16 +198,18 @@ func (p *httpRequestParser) pushHeader(rawHeader []byte) error {
 	p.protocol.OnHeader(key, value)
 
 	switch {
-	case bytes.Equal(key, contentLength):
-		p.contentLength, err = strconv.ParseUint(string(value), 10, 32)
+	case strings.EqualFold(key, contentLength):
+		p.contentLength, err = strconv.ParseUint(value, 10, 32)
 
 		if err != nil {
+			// why not to return the actual error? Because user expects parser's error object,
+			// not from some side library (e.g. strconv)
 			err = InvalidContentLengthValue
 		}
 
 		return err
-	case bytes.Equal(key, transferEncoding):
-		p.isChunked = bytes.Equal(bytes.ToLower(value), chunked)
+	case strings.EqualFold(key, transferEncoding):
+		p.isChunked = strings.EqualFold(value, chunked)
 
 		return nil
 	}
@@ -288,34 +217,60 @@ func (p *httpRequestParser) pushHeader(rawHeader []byte) error {
 	return nil
 }
 
-func (p *httpRequestParser) pushBodyPeace(peace []byte) (reqCompleted bool, extra []byte, err error) {
+func (p *httpRequestParser) pushBodyPiece(data []byte) (err error) {
 	if p.isChunked {
-		// TODO: make this also return extra-bytes
-		done, err := p.chunksParser.Feed(peace)
+		done, extra, err := p.chunksParser.Feed(data)
 
-		return done, nil, err
+		if err != nil {
+			p.state = Dead
+
+			return err
+		}
+
+		if done {
+			p.completeRequest()
+			p.Clear()
+
+			if len(extra) > 0 {
+				return p.Feed(extra)
+			}
+		}
+
+		return nil
 	}
 
-	peaceLen := uint64(len(peace))
-	totalBodyBytes := p.bodyBytesReceived + peaceLen
+	if p.contentLength == 0 {
+		p.completeRequest()
+		p.Clear()
 
-	if totalBodyBytes > p.contentLength {
-		extraBytes := totalBodyBytes - p.contentLength
-		extra = peace[extraBytes+1:]
-		peace = peace[:extraBytes+1]
-		peaceLen -= extraBytes
-		reqCompleted = true
+		return p.Feed(data)
 	}
 
-	p.bodyBytesReceived += peaceLen
-	p.protocol.OnBody(peace)
+	dataLen := uint64(len(data))
+	bodyBytesLeft := p.contentLength - p.bodyBytesReceived
 
-	return p.bodyBytesReceived == p.contentLength, extra, nil
+	if bodyBytesLeft > dataLen {
+		bodyBytesLeft = dataLen
+	}
+
+	p.protocol.OnBody(data[:bodyBytesLeft])
+	p.bodyBytesReceived += dataLen
+
+	if p.bodyBytesReceived >= p.contentLength {
+		p.completeRequest()
+		p.Clear()
+
+		if p.bodyBytesReceived - p.contentLength > 0 {
+			return p.Feed(data[bodyBytesLeft:])
+		}
+	}
+
+	return nil
 }
 
-func IsProtocolSupported(proto []byte) (isSupported bool) {
+func IsProtocolSupported(proto string) (isSupported bool) {
 	for _, supportedProto := range SupportedProtocols {
-		if bytes.Equal(supportedProto, proto) {
+		if proto == supportedProto {
 			return true
 		}
 	}
@@ -323,11 +278,11 @@ func IsProtocolSupported(proto []byte) (isSupported bool) {
 	return false
 }
 
-func parseMethodPathProtocolState(data []byte) (method, path, protocol []byte, err error) {
-	parsed := bytes.SplitN(data, space, 3)
+func parseMethodPathProtocolState(data string) (method, path, protocol string, err error) {
+	parsed := strings.SplitN(data, space, 3)
 
 	if len(parsed) != 3 {
-		return nil, nil, nil, RequestSyntaxError
+		return "", "", "", RequestSyntaxError
 	}
 
 	method = parsed[0]
@@ -335,20 +290,20 @@ func parseMethodPathProtocolState(data []byte) (method, path, protocol []byte, e
 	protocol = parsed[2]
 
 	if !IsMethodValid(method) || len(path) == 0 || !IsProtocolSupported(protocol) {
-		return nil, nil, nil, InvalidRequestData
+		return "", "", "", InvalidRequestData
 	}
 
 	return method, path, protocol, nil
 }
 
-func parseHeader(headersBytesString []byte) (key, value []byte, err error) {
-	for index, char := range headersBytesString {
+func parseHeader(headersString string) (key, value string, err error) {
+	for index, char := range headersString {
 		if char == ':' {
-			return headersBytesString[:index], bytes.TrimPrefix(headersBytesString[index+1:], space), nil
+			return headersString[:index], strings.TrimPrefix(headersString[index+1:], space), nil
 		}
 	}
 
-	return nil, nil, InvalidHeader
+	return "", "", InvalidHeader
 }
 
 func collapseByteArrays(base []byte, arrays ...[]byte) []byte {
@@ -363,10 +318,28 @@ func collapseByteArrays(base []byte, arrays ...[]byte) []byte {
 	return base
 }
 
-func printArrs(data [][]byte) {
+// snippet: https://github.com/valyala/fasthttp/blob/017f0aa09d7fd802bd1760836e329734ea642180/bytesconv.go#L342
+// I just a bit corrected it, as I need not s2b, but b2s
+//
+// B2S converts bytes to a string slice without memory allocation.
+//
+// Note it may break if string and/or slice header will change
+// in the future go versions.
+func B2S(s []byte) (b string) {
+	/* #nosec G103 */
+	bh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	/* #nosec G103 */
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	bh.Data = sh.Data
+	bh.Len = sh.Len
+
+	return b
+}
+
+/*func printArrs(data [][]byte) {
 	for _, arr := range data {
 		fmt.Print(quote(arr), " ")
 	}
 
 	fmt.Println()
-}
+}*/
