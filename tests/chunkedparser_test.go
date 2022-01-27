@@ -8,7 +8,7 @@ import (
 
 func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 
 	request := []byte("POST / HTTP/1.1\r\n" +
 		"Content-Type: some content type\n\r" +
@@ -57,6 +57,7 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 		"Transfer-Encoding: chunked\r\n" +
 		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
 
+	protocol.Clear()
 	err = FeedParser(parser, request, 5)
 
 	if !protocol.Completed {
@@ -95,14 +96,14 @@ func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 	expectBody := "Hello, world!But what's wrong with you?Finally am here"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 	err := parser.Feed([]byte(request))
 
 	if err != nil {
 		t.Errorf("error while parsing: %s", err)
 		return
 	} else if !protocol.Completed {
-		t.Errorf("the whole request was fed to parser but he does not think so")
+		t.Errorf("no completion flag")
 		return
 	}
 
@@ -112,5 +113,99 @@ func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 
 	if !succeeded {
 		t.Error(errmsg)
+	}
+}
+
+func TestChunkOverflow(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+	data := []byte("d\r\nHello, world! Overflow here\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
+
+	done, _, err := parser.Feed(data)
+
+	if !done {
+		t.Errorf("no completion flag")
+		return
+	}
+
+	if err == nil {
+		t.Errorf("no error returned")
+		return
+	}
+
+	if err != httpparser.InvalidChunkSplitter {
+		t.Errorf(`expected InvalidChunkSplitter error, got msg="%s"`, err.Error())
+		return
+	}
+}
+
+func TestChunkTooSmall(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+	data := []byte("d\r\nHello, ...\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
+
+	done, _, err := parser.Feed(data)
+
+	if !done {
+		t.Errorf("no completion flag")
+		return
+	}
+
+	if err == nil {
+		t.Errorf("no error returned")
+		return
+	}
+
+	if err != httpparser.InvalidChunkSplitter {
+		t.Errorf(`expected InvalidChunkSplitter error, got msg="%s"`, err.Error())
+		return
+	}
+}
+
+func TestMixChunkSplitters(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+	data := []byte("d\r\nHello, world!\n1a\r\nBut what's wrong with you?\nf\nFinally am here\r\n0\r\n\n")
+
+	done, _, err := parser.Feed(data)
+
+	if !done {
+		t.Error("no completion flag")
+		return
+	}
+
+	if err != nil {
+		t.Errorf("unexpected error: %s", err.Error())
+		return
+	}
+}
+
+func TestWithDifferentBlockSizes(t *testing.T) {
+	protocol := Protocol{}
+
+	data := []byte("d\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
+
+	for i := 1; i <= len(data); i++ {
+		parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+
+		for j := 0; j < len(data); j += i {
+			end := j + i
+
+			if end > len(data) {
+				end = len(data)
+			}
+
+			done, _, err := parser.Feed(data[j:end])
+
+			if err != nil {
+				t.Errorf("unexpected error: %s", err.Error())
+				return
+			}
+
+			if done && end < len(data) {
+				t.Error("having completion flag, but it isn't really completed")
+				return
+			}
+		}
 	}
 }
