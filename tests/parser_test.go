@@ -13,10 +13,10 @@ import (
 const BufferLength = 65535
 
 type Protocol struct {
-	Method 			string
-	Path 			string
-	Protocol 		string
-	Headers 		map[string]string
+	Method 			[]byte
+	Path 			[]byte
+	Protocol 		[]byte
+	Headers 		map[string][]byte
 	Body 			[]byte
 	Completed 		bool
 	CompletedTimes  int
@@ -24,24 +24,24 @@ type Protocol struct {
 
 func (p *Protocol) OnMessageBegin() {}
 
-func (p *Protocol) OnMethod(method string) {
+func (p *Protocol) OnMethod(method []byte) {
 	p.Method = method
 }
 
-func (p *Protocol) OnPath(path string) {
+func (p *Protocol) OnPath(path []byte) {
 	p.Path = path
 }
 
-func (p *Protocol) OnProtocol(proto string) {
+func (p *Protocol) OnProtocol(proto []byte) {
 	p.Protocol = proto
 }
 
 func (p *Protocol) OnHeadersBegin() {
-	p.Headers = make(map[string]string)
+	p.Headers = make(map[string][]byte)
 }
 
-func (p *Protocol) OnHeader(key, value string) {
-	p.Headers[key] = value
+func (p *Protocol) OnHeader(key, value []byte) {
+	p.Headers[string(key)] = value
 }
 
 func (p *Protocol) OnHeadersComplete() {}
@@ -55,29 +55,13 @@ func (p *Protocol) OnMessageComplete() {
 	p.CompletedTimes++
 }
 
-/*
-And this protocol is for benchmarking, that's why it's empty - to avoid
-extra-overhead
- */
-type BenchProtocol struct {}
-
-func (p *BenchProtocol) OnMessageBegin() {}
-
-func (p *BenchProtocol) OnMethod(_ []byte) {}
-
-func (p *BenchProtocol) OnPath(_ []byte) {}
-
-func (p *BenchProtocol) OnProtocol(_ []byte) {}
-
-func (p *BenchProtocol) OnHeadersBegin() {}
-
-func (p *BenchProtocol) OnHeader(_, _ []byte) {}
-
-func (p *BenchProtocol) OnHeadersComplete() {}
-
-func (p *BenchProtocol) OnBody(_ []byte) {}
-
-func (p *BenchProtocol) OnMessageComplete() {}
+func (p *Protocol) Clear() {
+	p.Path = nil
+	p.Method = nil
+	p.Protocol = nil
+	p.Headers = nil
+	p.Body = nil
+}
 
 func quote(data []byte) string {
 	return strconv.Quote(string(data))
@@ -129,7 +113,7 @@ func want(
 		return false, fmt.Sprintf("mismatching body length: expected %d, got %d",
 			expectedBodyLength, len(protocol.Body))
 	} else if string(protocol.Body) != expectBody {
-		return false, fmt.Sprintf(`mismatching body: expected "%s", got "%s"`,
+		return false, fmt.Sprintf(`mismatching body: expected "%s", got %s`,
 			expectBody, quote(protocol.Body))
 	}
 
@@ -138,7 +122,7 @@ func want(
 
 func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 
 	methodExpected := "GET"
 	pathExpected := "/"
@@ -192,7 +176,7 @@ func TestOrdinaryGETRequestParseFull(t *testing.T) {
 
 func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 	err := FeedParser(parser, request, 5)
 
 	if err != nil && err != errorWanted {
@@ -212,7 +196,7 @@ func TestInvalidGETRequestMissingMethod(t *testing.T) {
 func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nContent-Length: 13\r\n\r\nHello, world! Extra body")
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 	err := FeedParser(parser, request, 5)
 
 	if err != nil {
@@ -268,7 +252,7 @@ func TestInvalidGETRequestNoSpaces(t *testing.T) {
 
 func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 
 	ordinaryGetRequest := []byte("POST / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev" +
 		"\r\nContent-Length: 13\r\n\r\nHello, world!")
@@ -335,7 +319,7 @@ func TestChromeGETRequest(t *testing.T) {
 		"blqbudgdgdgdgddgdgdgdgdsgsdgsdgdgddgdGWnwfuDG; Goland-1dc491b=e03b2dgdgvdfgad0-b7ab-e4f8e1715c8b\r\n\r\n"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 	err := parser.Feed([]byte(request))
 
 	methodExpected := "GET"
@@ -365,7 +349,7 @@ func TestChromeGETRequest(t *testing.T) {
 
 func TestParserReuseAbility(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
 
 	request := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
 	err := FeedParser(parser, request, 5)
