@@ -1,230 +1,182 @@
 package snowdrop
 
-import (
-	"bytes"
-	"strconv"
-)
-
-
-const (
-	_maxChunkSize = 65535
-	_maxHexChunkSize = "FFFF"
-)
-
 type OnBodyCallback func([]byte)
 
 type chunkedBodyParser struct {
-	callback 					OnBodyCallback
-	state 						ChunkedBodyState
-	chunkLength  				int
-	chunkBodyReceived 			int
-	buffer						[]byte
-	chunksReceived				int
+	callback 			OnBodyCallback
+	state 				ChunkedBodyState
+	buffer				[]byte
+	chunkLength			int
+	bytesReceived 		int
+	chunksReceived		int
+
+	maxChunkSize 		int
+	chunkSizeHexLength	int
+	chunkSizeBits		int
 }
 
-func newChunkedBodyParser(callback OnBodyCallback) *chunkedBodyParser {
+func NewChunkedBodyParser(callback OnBodyCallback, maxChunkSize int) *chunkedBodyParser {
+	chunkSizeBits := getIntBits(maxChunkSize)
+
 	return &chunkedBodyParser{
-		callback:                  callback,
-		state:                     ChunkLengthExpected,
-		buffer:                    make([]byte, 0, _maxChunkSize),
+		callback: 		 	 callback,
+		state:    		 	 ChunkLength,
+		buffer:   		 	 make([]byte, 0, maxChunkSize),
+		maxChunkSize: 	 	 maxChunkSize,
+		chunkSizeBits: 		 getIntBits(maxChunkSize),
+		chunkSizeHexLength:  chunkSizeBits / 4,
 	}
 }
 
-func (p *chunkedBodyParser) Reuse(callback OnBodyCallback) {
-	p.callback = callback
-	p.Clear()
-}
-
 func (p *chunkedBodyParser) Clear() {
-	p.state = ChunkLengthExpected
+	p.state = ChunkLength
 	p.chunkLength = 0
-	p.chunkBodyReceived = 0
 	p.buffer = p.buffer[:0]
 	p.chunksReceived = 0
 }
 
 func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err error) {
-	if p.state == BodyCompleted {
-		// it's not http parser, here we don't care about streaming parse
-		return true, nil, nil
+	if p.state == TransferCompleted {
+		/*
+			It returns extra-bytes as parser must know, that it's his job now
+
+			But if parser is feeding again, it means only that
+		 */
+		p.Clear()
 	}
-	if len(data) == 0 || bytes.Equal(data, cr) {
+	if len(data) == 0 {
 		return false, nil, nil
 	}
 
-	lfCount := bytes.Count(data, lf)
+	for i, char := range data {
+		// okay, let it be O(n)
+		switch p.state {
+		case ChunkLength:
+			switch char {
+			case '\r':
+				if p.chunkLength, err = parseHex(p.buffer); err != nil {
+					p.complete()
 
-	if lfCount == 0 {
-		done, err = p.parseStateDataPiece(bytes.TrimSuffix(data, cr))
+					return true, nil, err
+				}
 
-		return done, nil, err
+				p.state = SplitterChunkLengthReceivedCR
+				p.buffer = p.buffer[:0]
+			case '\n':
+				if p.chunkLength, err = parseHex(p.buffer); err != nil {
+					p.complete()
+
+					return true, nil, err
+				}
+
+				p.state = ChunkBody
+				p.buffer = p.buffer[:0]
+			default:
+				// TODO: add support for trailers
+				p.buffer = append(p.buffer, char)
+
+				if len(p.buffer) > p.chunkSizeHexLength {
+					p.complete()
+
+					return true, nil, TooBigChunkSize
+				}
+			}
+		case ChunkBody:
+			if p.chunkLength == 0 {
+				if char == '\r' {
+					p.state = SplitterChunkBodyReceivedCR
+					continue
+				} else if char == '\n' {
+					p.complete()
+
+					return true, data[i+1:], nil
+				} else {
+					p.complete()
+
+					return true, nil, InvalidChunkSplitter
+				}
+			}
+
+			p.buffer = append(p.buffer, char)
+
+			if len(p.buffer) == p.chunkLength {
+				p.state = SplitterChunkBodyBegin
+				p.callback(p.buffer)
+				p.buffer = p.buffer[:0]
+			}
+		case SplitterChunkLengthBegin:
+			switch char {
+			case '\r':
+				p.state = SplitterChunkLengthReceivedCR
+			case '\n':
+				p.state = ChunkBody
+			default:
+				p.complete()
+
+				return true, nil, InvalidChunkSplitter
+			}
+		case SplitterChunkLengthReceivedCR:
+			if char != '\n' {
+				p.complete()
+
+				return true, nil, InvalidChunkSplitter
+			}
+
+			p.state = ChunkBody
+		case SplitterChunkBodyBegin:
+			switch char {
+			case '\r':
+				p.state = SplitterChunkBodyReceivedCR
+			case '\n':
+				if p.chunkLength == 0 {
+					p.complete()
+
+					return true, data[i+1:], nil
+				}
+
+				p.state = ChunkLength
+			default:
+				p.complete()
+
+				return true, nil, InvalidChunkSplitter
+			}
+		case SplitterChunkBodyReceivedCR:
+			if char != '\n' {
+				p.complete()
+
+				return true, nil, InvalidChunkSplitter
+			}
+
+			if p.chunkLength == 0 {
+				p.complete()
+
+				return true, data[i+1:], nil
+			}
+
+			p.state = ChunkLength
+		}
+	}
+
+	return false, nil, nil
+}
+
+func (p *chunkedBodyParser) complete() {
+	p.state = TransferCompleted
+}
+
+// https://stackoverflow.com/questions/2274428/how-to-determine-how-many-bytes-an-integer-needs/2274457
+func getIntBits(x int) int {
+	if x < 0x10000 {
+		if x < 0x100 {
+			return 8
+		} else {
+			return 16
+		}
 	} else {
-		nextLF := bytes.IndexByte(data, '\n')
-
-		for i := 0; i < lfCount; i++ {
-			piece := bytes.TrimPrefix(data[:nextLF], cr)
-			done, err = p.parseStateData(piece)
-
-			if err != nil {
-				return true, nil, err
-			}
-			if done {
-				return true, data[nextLF+1:], nil
-			}
-
-			data = data[nextLF+1:]
-			nextLF = bytes.IndexByte(data, '\n')
+		if x < 0x100000000 {
+			return 32
+		} else {
+			return 64
 		}
-
-		// this must be already the last one sliced element
-		done, err = p.parseStateDataPiece(data)
-
-		return done, nil, err
 	}
-}
-
-func (p *chunkedBodyParser) parseStateDataPiece(data []byte) (done bool, err error) {
-	switch p.state {
-	case ChunkExpected:
-		if p.chunkBodyReceived + len(data) > p.chunkLength {
-			p.state = BodyCompleted
-
-			return true, TooBigChunk
-		} else if p.chunkLength == 0 {
-			return true, nil
-		}
-
-		if p.pushBody(data) {
-			return true, nil
-		}
-	case ChunkLengthExpected:
-		if len(p.buffer)  > len(_maxHexChunkSize) {
-			p.state = BodyCompleted
-
-			return true, TooBigChunkSize
-		}
-
-		p.buffer = append(p.buffer, data...)
-
-		return false, nil
-	}
-
-	// this also shouldn't ever happen
-	// i hope
-	p.state = BodyCompleted
-
-	return true, AssertationError
-}
-
-func (p *chunkedBodyParser) parseStateData(data []byte) (done bool, err error) {
-	switch p.state {
-	case ChunkExpected:
-		if p.chunkBodyReceived + len(data) > p.chunkLength {
-			// in this handler we're passing only whole pieces, so yep
-			return true, TooBigChunk
-		}
-
-		done = p.pushBody(data)
-
-		if !done {
-			p.chunkBodyReceived += len(data)
-		}
-
-		return false, nil
-	case ChunkLengthExpected:
-		rawChunkLength := B2S(p.buffer)
-		chunkLength, err := strconv.ParseInt(rawChunkLength, 16, 32)
-
-		if err != nil {
-			p.state = BodyCompleted
-
-			return true, InvalidChunkSize
-		}
-
-		p.chunkLength = int(chunkLength)
-
-		return false, nil
-	}
-
-	p.state = BodyCompleted
-
-	// this shouldn't ever happen
-	// i hope
-	return true, AssertationError
-}
-
-func (p *chunkedBodyParser) pushBody(data []byte) (done bool) {
-	p.callback(data)
-	p.chunkBodyReceived += len(data)
-
-	if p.chunkBodyReceived == p.chunkLength {
-		p.chunkBodyReceived = 0
-		p.chunksReceived++
-		p.state = ChunkLengthExpected
-
-		return true
-	}
-
-	return false
-}
-
-func (p *chunkedBodyParser) parseDataAndGetNextStep(data []byte) (nextState ChunkedBodyState, err error) {
-	if len(data) == 0 {
-		if p.chunkLength == 0 {
-			return BodyCompleted, nil
-		}
-
-		p.callback(lf)
-	}
-
-	switch p.state {
-	case ChunkLengthExpected:
-		if len(data) > len(_maxHexChunkSize) {
-			return BodyCompleted, TooBigChunkSize
-		}
-
-		chunkLength, err := strconv.ParseInt(string(data), 16, 32)
-
-		if err != nil {
-			return BodyCompleted, InvalidChunkSize
-		} else if chunkLength > _maxChunkSize {
-			return BodyCompleted, TooBigChunkSize
-		}
-
-		p.chunkLength = int(chunkLength)
-
-		return ChunkExpected, nil
-	case ChunkExpected:
-		if p.chunkBodyReceived + len(data) > p.chunkLength {
-			return BodyCompleted, TooBigChunk
-		}
-		if p.chunkLength == 0 {
-			return BodyCompleted, nil
-		}
-
-		p.callback(data)
-		p.chunkBodyReceived += len(data)
-
-		if p.chunkBodyReceived == p.chunkLength {
-			p.chunkBodyReceived = 0
-			p.chunksReceived++
-
-			return ChunkLengthExpected, nil
-		}
-
-		return ChunkExpected, nil
-	}
-
-	return p.state, nil
-}
-
-func quote(data []byte) string {
-	/*
-		Isn't removed yet as sometimes I need this for debug
-
-		Don't ask me why I'm not using debugger. Once I used,
-		an it fucked up my videodriver. I don't wanna try again
-	*/
-
-	return strconv.Quote(string(data))
 }
