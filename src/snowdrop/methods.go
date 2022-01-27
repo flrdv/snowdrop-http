@@ -1,31 +1,28 @@
 package snowdrop
 
+import "bytes"
 
-type HTTPMethod string
+type HTTPMethod []byte
 
 var (
-	GET HTTPMethod = "GET"
-	HEAD HTTPMethod = "HEAD"
-	POST HTTPMethod = "POST"
-	PUT HTTPMethod = "PUT"
-	DELETE HTTPMethod = "DELETE"
-	CONNECT HTTPMethod = "CONNECT"
-	OPTIONS HTTPMethod = "OPTIONS"
-	TRACE HTTPMethod = "TRACE"
-	PATCH HTTPMethod = "PATCH"
+	GET HTTPMethod = []byte("GET")
+	HEAD HTTPMethod = []byte("HEAD")
+	POST HTTPMethod = []byte("POST")
+	PUT HTTPMethod = []byte("PUT")
+	DELETE HTTPMethod = []byte("DELETE")
+	CONNECT HTTPMethod = []byte("CONNECT")
+	OPTIONS HTTPMethod = []byte("OPTIONS")
+	TRACE HTTPMethod = []byte("TRACE")
+	PATCH HTTPMethod = []byte("PATCH")
 )
 
-func IsMethodValid(method string) bool {
-	switch HTTPMethod(method) {
-	case GET,
-		 HEAD,
-		 POST,
-		 PUT,
-		 DELETE,
-		 CONNECT,
-		 OPTIONS,
-		 TRACE,
-		 PATCH: return true
+var HTTPMethods = [][]byte{GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH}
+
+func IsMethodValid(method []byte) bool {
+	for _, existingMethod := range HTTPMethods {
+		if bytes.Equal(existingMethod, method) {
+			return true
+		}
 	}
 
 	return false
