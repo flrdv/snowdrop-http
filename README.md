@@ -26,25 +26,25 @@ Example of implemented protocol you can find [here](https://github.com/floordiv/
 # FAQ
 > *Q*: How does parser behave in case of chunked request?
 
-> *A*: OnBody() callback will be called. Current chunked bodies parser isn't effective enough, so guaranteed that OnBody() callback will receive the whole chunk as it was sent. In future, this won't be guaranteed
+> *A*: OnBody() callback will be called each time when full chunk was received
 
 <br>
 
 > *Q*: How does parser behave in case of extra-bytes are passed?
 
-> *A*: They'll be just ignored
+> *A*: Parser is stream-based, so parser's lifetime equals to connection lifetime. Protocol methods will be called in a loop, every time, when new data is ready to be pushed
 
 <br>
 
 > *Q*: Can it parse requests that use not CRLF, but just LF?
 
-> *A*: Yes. Parser is built that it ignores all the \r characters (you should keep this feature in your mind as this is possibly security issue), so it parses CRLF sequences as well as LF
+> *A*: Yes. Parser may parse even requests with mixed usage of CRLF and LF
 
 <br>
 
 > *Q*: What's if it is not a GET request, but Content-Length is not specified?
 
-> *A*: Body won't be parsed, parser will think this request has empty body
+> *A*: Request's body will be marked as empty (QA below referrs to this question)
 
 <br>
 
@@ -52,13 +52,19 @@ Example of implemented protocol you can find [here](https://github.com/floordiv/
 
 > *A*: OnBody() won't be called during parsing, but OnMessageComplete() will
 
+<br>
+
+> *Q*: What will happen if an error will occur?
+
+> *A*: Parser will die (the state of it will be set to Dead forever), and all the attempts to feed it again will return error ParserIsDead
+
 # Example:
 
 ```golang
 package main
 
 import (
-	"github.com/floordiv/snowdrop-http/src/httpparser"
+	httpparser "github.com/floordiv/snowdrop-http/src/snowdrop"
 )
 
 
@@ -69,11 +75,13 @@ type Protocol struct {
 
 func main() {
 	protocol := Protocol{...}
-	parser := httpparser.NewHTTPRequestParser(&protocol)
-	data := ... // http request taken from any source, but []byte
-	completed, err := parser.Feed(data)
+	bufferLength := 65535
+	parser := httpparser.NewHTTPRequestParser(&protocol, bufferLength)
+	data := ... // http request taken from any source, with []byte type
+	err := parser.Feed(data)
 	
 	if err != nil {
+		// parser isn't able to parse anymore
 		log.Fatal(err)
 	}
 	
