@@ -10,15 +10,15 @@ type ProtocolV2 struct {}
 
 func (p *ProtocolV2) OnMessageBegin() {}
 
-func (p *ProtocolV2) OnMethod(_ string) {}
+func (p *ProtocolV2) OnMethod(_ []byte) {}
 
-func (p *ProtocolV2) OnPath(_ string) {}
+func (p *ProtocolV2) OnPath(_ []byte) {}
 
-func (p *ProtocolV2) OnProtocol(_ string) {}
+func (p *ProtocolV2) OnProtocol(_ []byte) {}
 
 func (p *ProtocolV2) OnHeadersBegin() {}
 
-func (p *ProtocolV2) OnHeader(_, _ string) {}
+func (p *ProtocolV2) OnHeader(_, _ []byte) {}
 
 func (p *ProtocolV2) OnHeadersComplete() {}
 
@@ -38,9 +38,25 @@ var bigChromeRequest = []byte("GET / HTTP/1.1\r\nHost: localhost:8080\r\nConnect
 	"blqbu0Ksvtdr7qrwgwgwwefdewf8JjB472GWnwfuDG; Goland-1dc491b=gegwfewfewfewf4ad0-b7ab-e4f8e1715c8b\r\n\r\n")
 var smallGetRequest = []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
 
+func divideBytes(src []byte, chunkSize int) [][]byte {
+	var divided [][]byte
+
+	for i := 0; i < len(src); i += chunkSize {
+		end := i + chunkSize
+
+		if end > len(src) {
+			end = len(src)
+		}
+
+		divided = append(divided, src[i:end])
+	}
+
+	return divided
+}
+
 func BenchmarkSmallGETRequestBy1Char(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535)
+	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535, -1)
 	chars := divideBytes(smallGetRequest, 1)
 
 	b.ResetTimer()
@@ -54,7 +70,7 @@ func BenchmarkSmallGETRequestBy1Char(b *testing.B) {
 
 func BenchmarkSmallGETRequestBy5Chars(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535)
+	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535, -1)
 	chars := divideBytes(smallGetRequest, 5)
 
 	b.ResetTimer()
@@ -68,7 +84,7 @@ func BenchmarkSmallGETRequestBy5Chars(b *testing.B) {
 
 func BenchmarkSmallGETRequestFull(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535)
+	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535, 01)
 
 	b.ResetTimer()
 
@@ -79,7 +95,7 @@ func BenchmarkSmallGETRequestFull(b *testing.B) {
 
 func BenchmarkBigChromeRequestBy1Char(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535)
+	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535, -1)
 	chars := divideBytes(bigChromeRequest, 1)
 
 	b.ResetTimer()
@@ -93,7 +109,7 @@ func BenchmarkBigChromeRequestBy1Char(b *testing.B) {
 
 func BenchmarkBigChromeRequestBy5Chars(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535)
+	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535, -1)
 	chars := divideBytes(bigChromeRequest, 5)
 
 	b.ResetTimer()
@@ -107,7 +123,7 @@ func BenchmarkBigChromeRequestBy5Chars(b *testing.B) {
 
 func BenchmarkBigChromeRequestFull(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535)
+	parser := snowdrop.NewHTTPRequestParser(&protocol, 65535, -1)
 
 	b.ResetTimer()
 
