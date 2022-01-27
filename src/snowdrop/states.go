@@ -7,8 +7,7 @@ type (
 )
 
 const (
-	MessageBegin ParsingState = iota + 1
-	MethodPathProtocol
+	MethodPathProtocol ParsingState = iota + 1
 	Headers
 	Body
 
@@ -16,7 +15,16 @@ const (
 )
 
 const (
-	ChunkExpected ChunkedBodyState = iota + 1
-	ChunkLengthExpected
-	BodyCompleted
+	ChunkBody ChunkedBodyState = iota + 1
+	ChunkLength
+
+	/* Started splitter AFTER chunk length */
+	SplitterChunkLengthBegin
+	SplitterChunkLengthReceivedCR
+
+	/* Started splitter AFTER chunk body */
+	SplitterChunkBodyBegin
+	SplitterChunkBodyReceivedCR
+
+	TransferCompleted
 )
