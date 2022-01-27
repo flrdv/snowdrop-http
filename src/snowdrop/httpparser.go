@@ -2,38 +2,36 @@ package snowdrop
 
 import (
 	"bytes"
-	"reflect"
-	"strconv"
-	"strings"
-	"unsafe"
 )
 
-const DefaultBufferLength = 65535
 const (
-	space 			 = " "
-	contentLength 	 = "content-length"
-	transferEncoding = "transfer-encoding"
-	chunked 		 = "chunked"
+	DefaultBufferLength = 65535
+	DefaultChunkLength  = 65535
 )
+
 var (
 	cr				 = []byte("\r")
 	lf 		 		 = []byte("\n")
+	space 			 = []byte(" ")
+	contentLength 	 = []byte("content-length")
+	transferEncoding = []byte("transfer-encoding")
+	chunked 		 = []byte("chunked")
 )
 
 /*
 In reversed order because newer are more often than older
  */
-var SupportedProtocols = []string{
-	"HTTP/1.1", "HTTP/1.0", "HTTP/0.9",
+var SupportedProtocols = [][]byte{
+	[]byte("HTTP/1.1"), []byte("HTTP/1.0"), []byte("HTTP/0.9"),
 }
 
 type IProtocol interface {
 	OnMessageBegin()
-	OnMethod(string)
-	OnPath(string)
-	OnProtocol(string)
+	OnMethod([]byte)
+	OnPath([]byte)
+	OnProtocol([]byte)
 	OnHeadersBegin()
-	OnHeader(string, string)
+	OnHeader([]byte, []byte)
 	OnHeadersComplete()
 	OnBody([]byte)
 	OnMessageComplete()
@@ -46,16 +44,19 @@ type httpRequestParser struct {
 	buffer 				[]byte
 
 	maxBufferLength 	int
-	contentLength		uint64
-	bodyBytesReceived 	uint64
+	contentLength		int
+	bodyBytesReceived 	int
 
 	isChunked 			bool
  	chunksParser 		*chunkedBodyParser
 }
 
-func NewHTTPRequestParser(protocol IProtocol, maxBufferLength int) *httpRequestParser {
+func NewHTTPRequestParser(protocol IProtocol, maxBufferLength, maxChunkLength int) *httpRequestParser {
 	if maxBufferLength < 1 {
 		maxBufferLength = DefaultBufferLength
+	}
+	if maxChunkLength < 1 {
+		maxChunkLength = DefaultChunkLength
 	}
 
 	protocol.OnMessageBegin()
@@ -63,7 +64,7 @@ func NewHTTPRequestParser(protocol IProtocol, maxBufferLength int) *httpRequestP
 	return &httpRequestParser{
 		protocol: protocol,
 		buffer: make([]byte, 0, maxBufferLength),
-		chunksParser: newChunkedBodyParser(protocol.OnBody),
+		chunksParser: NewChunkedBodyParser(protocol.OnBody, maxChunkLength),
 		maxBufferLength: maxBufferLength,
 		state: MethodPathProtocol,
 	}
@@ -75,7 +76,6 @@ func (p *httpRequestParser) Clear() {
 	p.contentLength = 0
 	p.bodyBytesReceived = 0
 	p.isChunked = false
-	p.chunksParser.Clear()
 
 	p.protocol.OnMessageBegin()
 }
@@ -85,6 +85,8 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 	This parser is absolutely stand-alone. It's like a separated sub-system in every
 	server, because everything you need is just to feed it
 	 */
+
+	// TODO: make it the same as chunked parser
 
 	if len(data) == 0 {
 		return nil
@@ -99,6 +101,9 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 	if lfCount == 0 {
 		if len(p.buffer) + len(data) >= p.maxBufferLength {
+			p.completeRequest()
+			p.state = Dead
+
 			return BufferSizeExceeded
 		}
 
@@ -117,13 +122,18 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 	lfIndex := bytes.IndexByte(data, '\n')
 
 	for i := 0; i < lfCount; i++ {
-		p.state, reqErr = p.parseAndGetNextState(bytes.TrimSuffix(data[:lfIndex], cr))
+		p.state, reqErr = p.parseAndGetNextState(data[:lfIndex])
 
 		if reqErr != nil {
 			return reqErr
 		}
 
 		data = data[lfIndex+1:]
+
+		if p.state == Body {
+			return p.pushBodyPiece(data)
+		}
+
 		lfIndex = bytes.IndexByte(data, '\n')
 	}
 
@@ -139,7 +149,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingState, err error) {
 	switch p.state {
 	case MethodPathProtocol:
-		method, path, protocol, err := parseMethodPathProtocolState(B2S(data))
+		method, path, protocol, err := parseMethodPathProtocolState(bytes.TrimSuffix(data, cr))
 
 		if err != nil {
 			return Dead, err
@@ -152,6 +162,8 @@ func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingS
 
 		return Headers, nil
 	case Headers:
+		data = bytes.TrimSuffix(data, cr)
+
 		if len(data) == 0 {
 			p.protocol.OnHeadersComplete()
 
@@ -165,7 +177,7 @@ func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingS
 			return Body, nil
 		}
 
-		if err = p.pushHeader(B2S(data)); err != nil {
+		if err = p.pushHeader(data); err != nil {
 			return Dead, err
 		}
 
@@ -177,7 +189,7 @@ func (p *httpRequestParser) parseAndGetNextState(data []byte) (newState ParsingS
 	// this error must never be returned as may occur only in case
 	// if current state is MessageBegin, MessageComplete, or some
 	// unknown
-	return Dead, RequestSyntaxError
+	return Dead, AssertationError
 }
 
 func (p *httpRequestParser) completeRequest() {
@@ -188,7 +200,7 @@ func (p *httpRequestParser) completeRequest() {
 	p.protocol.OnMessageComplete()
 }
 
-func (p *httpRequestParser) pushHeader(rawHeader string) error {
+func (p *httpRequestParser) pushHeader(rawHeader []byte) error {
 	key, value, err := parseHeader(rawHeader)
 
 	if err != nil {
@@ -198,18 +210,17 @@ func (p *httpRequestParser) pushHeader(rawHeader string) error {
 	p.protocol.OnHeader(key, value)
 
 	switch {
-	case strings.EqualFold(key, contentLength):
-		p.contentLength, err = strconv.ParseUint(value, 10, 32)
+	case EqualFold(contentLength, key):
+		/*
+		TODO: write own implementation of ParseInt to avoid unsafe code
+		  	  UPD: looks like done
+		 */
 
-		if err != nil {
-			// why not to return the actual error? Because user expects parser's error object,
-			// not from some side library (e.g. strconv)
-			err = InvalidContentLengthValue
-		}
+		p.contentLength, err = parseUint(value)
 
 		return err
-	case strings.EqualFold(key, transferEncoding):
-		p.isChunked = strings.EqualFold(value, chunked)
+	case EqualFold(transferEncoding, key):
+		p.isChunked = EqualFold(value, chunked)
 
 		return nil
 	}
@@ -246,7 +257,7 @@ func (p *httpRequestParser) pushBodyPiece(data []byte) (err error) {
 		return p.Feed(data)
 	}
 
-	dataLen := uint64(len(data))
+	dataLen := len(data)
 	bodyBytesLeft := p.contentLength - p.bodyBytesReceived
 
 	if bodyBytesLeft > dataLen {
@@ -268,9 +279,9 @@ func (p *httpRequestParser) pushBodyPiece(data []byte) (err error) {
 	return nil
 }
 
-func IsProtocolSupported(proto string) (isSupported bool) {
+func IsProtocolSupported(proto []byte) (isSupported bool) {
 	for _, supportedProto := range SupportedProtocols {
-		if proto == supportedProto {
+		if bytes.Equal(proto, supportedProto) {
 			return true
 		}
 	}
@@ -278,11 +289,11 @@ func IsProtocolSupported(proto string) (isSupported bool) {
 	return false
 }
 
-func parseMethodPathProtocolState(data string) (method, path, protocol string, err error) {
-	parsed := strings.SplitN(data, space, 3)
+func parseMethodPathProtocolState(data []byte) (method, path, protocol []byte, err error) {
+	parsed := bytes.SplitN(data, space, 3)
 
 	if len(parsed) != 3 {
-		return "", "", "", RequestSyntaxError
+		return nil, nil, nil, RequestSyntaxError
 	}
 
 	method = parsed[0]
@@ -290,36 +301,36 @@ func parseMethodPathProtocolState(data string) (method, path, protocol string, e
 	protocol = parsed[2]
 
 	if !IsMethodValid(method) || len(path) == 0 || !IsProtocolSupported(protocol) {
-		return "", "", "", InvalidRequestData
+		return nil, nil, nil, InvalidRequestData
 	}
 
 	return method, path, protocol, nil
 }
 
-func parseHeader(headersString string) (key, value string, err error) {
+func parseHeader(headersString []byte) (key, value []byte, err error) {
 	for index, char := range headersString {
 		if char == ':' {
-			return headersString[:index], strings.TrimPrefix(headersString[index+1:], space), nil
+			return headersString[:index], bytes.TrimPrefix(headersString[index+1:], space), nil
 		}
 	}
 
-	return "", "", InvalidHeader
+	return nil, nil, InvalidHeader
 }
 
-// snippet: https://github.com/valyala/fasthttp/blob/017f0aa09d7fd802bd1760836e329734ea642180/bytesconv.go#L342
-// I just a bit corrected it, as I need not s2b, but b2s
-//
-// B2S converts bytes to a string slice without memory allocation.
-//
-// Note it may break if string and/or slice header will change
-// in the future go versions.
-func B2S(s []byte) (b string) {
-	/* #nosec G103 */
-	bh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	/* #nosec G103 */
-	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	bh.Data = sh.Data
-	bh.Len = sh.Len
+func EqualFold(sample, data []byte) bool {
+	/*
+		Works only for ascii!
+	 */
 
-	return b
+	if len(sample) != len(data) {
+		return false
+	}
+
+	for i, char := range sample {
+		if char != (data[i] | 0x20) {
+			return false
+		}
+	}
+
+	return true
 }
