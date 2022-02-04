@@ -1,17 +1,16 @@
 package httpparser
 
 import (
+	"github.com/floordiv/snowdrop/src/httpparser"
 	"testing"
-
-	httpparser "github.com/floordiv/snowdrop/src/snowdrop"
 )
 
 func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	request := []byte("POST / HTTP/1.1\r\n" +
-		"Content-Type: some content type\n\r" +
+		"Content-Type: some content type\r\n" +
 		"Host: rush.dev\r\n" +
 		"Transfer-Encoding: chunked\r\n" +
 		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
@@ -29,9 +28,9 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	methodExpected := "POST"
 	pathExpected := "/"
 	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
-		"Content-Type": "some content type",
-		"Host": "rush.dev",
+	headersExpected := map[string]string{
+		"Content-Type":      "some content type",
+		"Host":              "rush.dev",
 		"Transfer-Encoding": "chunked",
 	}
 	expectBody := "Hello, world!But what's wrong with you?Finally am here"
@@ -52,7 +51,7 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 		But I lost 2 evenings to see this strange shit, so I don't mind
 	*/
 	request = []byte("POST / HTTP/1.1\r\n" +
-		"Content-Type: some content type\n\r" +
+		"Content-Type: some content type\r\n" +
 		"Host: rush.dev\r\n" +
 		"Transfer-Encoding: chunked\r\n" +
 		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
@@ -80,7 +79,7 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 
 func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 	request := "POST / HTTP/1.1\r\n" +
-		"Content-Type: some content type\n\r" +
+		"Content-Type: some content type\r\n" +
 		"Host: rush.dev\r\n" +
 		"Transfer-Encoding: chunked\r\n" +
 		"\r\nd\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n"
@@ -88,15 +87,15 @@ func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 	methodExpected := "POST"
 	pathExpected := "/"
 	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
-		"Content-Type": "some content type",
-		"Host": "rush.dev",
+	headersExpected := map[string]string{
+		"Content-Type":      "some content type",
+		"Host":              "rush.dev",
 		"Transfer-Encoding": "chunked",
 	}
 	expectBody := "Hello, world!But what's wrong with you?Finally am here"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := parser.Feed([]byte(request))
 
 	if err != nil {
@@ -182,7 +181,6 @@ func TestMixChunkSplitters(t *testing.T) {
 
 func TestWithDifferentBlockSizes(t *testing.T) {
 	protocol := Protocol{}
-
 	data := []byte("d\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
 
 	for i := 1; i <= len(data); i++ {
