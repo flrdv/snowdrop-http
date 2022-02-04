@@ -1,4 +1,4 @@
-package snowdrop
+package httpparser
 
 func parseUint(raw []byte) (num int, err error) {
 	/*
@@ -15,7 +15,7 @@ func parseUint(raw []byte) (num int, err error) {
 			return 0, InvalidContentLength
 		}
 
-		num = num * 10 + int(char)
+		num = num*10 + int(char)
 	}
 
 	return num, nil
@@ -34,7 +34,7 @@ func parseHex(raw []byte) (num int, err error) {
 			return 0, InvalidChunkSize
 		}
 
-		num = (num << 4) + int((char & 0xF) + 9 * (char >> 6))
+		num = (num << 4) + int((char&0xF)+9*(char>>6))
 	}
 
 	return num, nil
