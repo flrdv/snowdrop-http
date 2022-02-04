@@ -3,14 +3,12 @@ package httpparser
 import (
 	"bytes"
 	"fmt"
+	"github.com/floordiv/snowdrop/src/httpparser"
 	"testing"
-
-	"github.com/floordiv/snowdrop/src/snowdrop"
 )
 
-
 func BenchmarkSmallChunkedBody(b *testing.B) {
-	parser := snowdrop.NewChunkedBodyParser(func(_ []byte) {}, 65535)
+	parser := httpparser.NewChunkedBodyParser(func(_ []byte) {}, 65535)
 	sampleChunkedBody := []byte("d\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\nok")
 
 	b.ResetTimer()
@@ -21,7 +19,7 @@ func BenchmarkSmallChunkedBody(b *testing.B) {
 }
 
 func Benchmark100BigChunks(b *testing.B) {
-	parser := snowdrop.NewChunkedBodyParser(func(_ []byte) {}, 65535)
+	parser := httpparser.NewChunkedBodyParser(func(_ []byte) {}, 65535)
 	var data []byte
 
 	for i := 0; i < 100; i++ {
