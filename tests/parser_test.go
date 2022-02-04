@@ -2,24 +2,20 @@ package httpparser
 
 import (
 	"fmt"
+	"github.com/floordiv/snowdrop/src/httpparser"
 	"strconv"
 	"strings"
 	"testing"
-
-	httpparser "github.com/floordiv/snowdrop/src/snowdrop"
 )
 
-
-const BufferLength = 65535
-
 type Protocol struct {
-	Method 			[]byte
-	Path 			[]byte
-	Protocol 		[]byte
-	Headers 		map[string][]byte
-	Body 			[]byte
-	Completed 		bool
-	CompletedTimes  int
+	Method         []byte
+	Path           []byte
+	Protocol       []byte
+	Headers        map[string][]byte
+	Body           []byte
+	Completed      bool
+	CompletedTimes int
 }
 
 func (p *Protocol) OnMessageBegin() {}
@@ -89,11 +85,15 @@ func want(
 	}
 
 	for key, value := range headers {
-		if !strictHeadersCheck { key = strings.ToLower(key) }
+		if !strictHeadersCheck {
+			key = strings.ToLower(key)
+		}
 
 		expectedValue, found := headers[key]
 
-		if !strictHeadersCheck { expectedValue = strings.ToLower(expectedValue) }
+		if !strictHeadersCheck {
+			expectedValue = strings.ToLower(expectedValue)
+		}
 
 		if !found {
 			if strictHeadersCheck {
@@ -122,14 +122,14 @@ func want(
 
 func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	methodExpected := "GET"
 	pathExpected := "/"
 	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
+	headersExpected := map[string]string{
 		"Content-Type": "some content type",
-		"Host": "rush.dev",
+		"Host":         "rush.dev",
 	}
 	bodyLenExpected := 0
 
@@ -176,7 +176,7 @@ func TestOrdinaryGETRequestParseFull(t *testing.T) {
 
 func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := FeedParser(parser, request, 5)
 
 	if err != nil && err != errorWanted {
@@ -190,54 +190,53 @@ func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 
 func TestInvalidGETRequestMissingMethod(t *testing.T) {
 	request := []byte("/ HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.RequestSyntaxError)
+	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
+}
+
+func TestInvalidGETRequestEmptyMethod(t *testing.T) {
+	request := []byte(" / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
+}
+
+func TestInvalidGETRequestInvalidMethod(t *testing.T) {
+	request := []byte("GETP / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
 }
 
 func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nContent-Length: 13\r\n\r\nHello, world! Extra body")
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := FeedParser(parser, request, 5)
 
-	if err != nil {
-		t.Errorf("unexpected error: %s", err)
-		return
-	} else if !protocol.Completed {
-		t.Error("fed the whole request (and even more) but no completion mark")
+	if err == nil {
+		t.Error("no errors occurred whenever they have to")
 		return
 	}
+	if err != httpparser.InvalidMethod {
+		/*
+			As we have a stream-based parser, we expect that extra-body always mean a new request
+			So that's why we expect here InvalidMethod error: " Extra" is really invalid method
+		*/
 
-	wantedMethod := "POST"
-	wantedPath := "/"
-	wantedProtocol := "HTTP/1.1"
-	wantedHeaders := map[string]string {
-		"Host": "rush.dev",
-	}
-	bodyLenWanted := 13
-
-	succeeded, errmsg := want(
-		protocol, wantedMethod, wantedPath,
-		wantedProtocol, wantedHeaders, bodyLenWanted,
-		"Hello, world!", false)
-
-	if !succeeded {
-		t.Error(errmsg)
+		t.Errorf(`expected InvalidMethod error, got "%s"`, err.Error())
+		return
 	}
 }
 
 func TestInvalidGETRequestUnknownProtocol(t *testing.T) {
 	request := []byte("GET / HTTP/1.2\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidRequestData)
+	testInvalidGETRequest(t, request, httpparser.ProtocolNotSupported)
 }
 
 func TestInvalidGETRequestEmptyPath(t *testing.T) {
 	request := []byte("GET  HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidRequestData)
+	testInvalidGETRequest(t, request, httpparser.InvalidPath)
 }
 
 func TestInvalidGETRequestMissingPath(t *testing.T) {
 	request := []byte("GET HTTP/1.2\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.RequestSyntaxError)
+	testInvalidGETRequest(t, request, httpparser.InvalidPath)
 }
 
 func TestInvalidGETRequestInvalidHeader(t *testing.T) {
@@ -247,12 +246,12 @@ func TestInvalidGETRequestInvalidHeader(t *testing.T) {
 
 func TestInvalidGETRequestNoSpaces(t *testing.T) {
 	request := []byte("GET/HTTP/1.1\r\nContent-Typesomecontenttype\r\nHost:rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.RequestSyntaxError)
+	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
 }
 
 func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	ordinaryGetRequest := []byte("POST / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev" +
 		"\r\nContent-Length: 13\r\n\r\nHello, world!")
@@ -260,9 +259,9 @@ func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	methodExpected := "POST"
 	pathExpected := "/"
 	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
-		"Content-Type": "some content type",
-		"Host": "rush.dev",
+	headersExpected := map[string]string{
+		"Content-Type":   "some content type",
+		"Host":           "rush.dev",
 		"Content-Length": "13",
 	}
 	bodyLenExpected := 13
@@ -319,15 +318,15 @@ func TestChromeGETRequest(t *testing.T) {
 		"blqbudgdgdgdgddgdgdgdgdsgsdgsdgdgddgdGWnwfuDG; Goland-1dc491b=e03b2dgdgvdfgad0-b7ab-e4f8e1715c8b\r\n\r\n"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := parser.Feed([]byte(request))
 
 	methodExpected := "GET"
 	pathExpected := "/"
 	protocolExpected := "HTTP/1.1"
-	headersExpected := map[string]string {
-		"Host": "localhost:8080",
-		"Content-Type": "some content type",
+	headersExpected := map[string]string{
+		"Host":            "localhost:8080",
+		"Content-Type":    "some content type",
 		"Accept-Encoding": "gzip, deflate, br",
 	}
 	bodyLenExpected := 0
@@ -349,7 +348,7 @@ func TestChromeGETRequest(t *testing.T) {
 
 func TestParserReuseAbility(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, BufferLength, -1)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	request := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
 	err := FeedParser(parser, request, 5)
@@ -362,7 +361,7 @@ func TestParserReuseAbility(t *testing.T) {
 		return
 	}
 
-	protocol = Protocol{}
+	//protocol = Protocol{}
 	err = FeedParser(parser, request, 5)
 
 	if !protocol.Completed {
