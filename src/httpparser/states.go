@@ -18,6 +18,7 @@ const (
 	headerValueLF
 	headerValueDoubleCR
 	body
+	bodyConnectionClose
 
 	dead
 )
