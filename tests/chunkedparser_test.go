@@ -18,7 +18,7 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	err := FeedParser(parser, request, 5)
 
 	if !protocol.Completed {
-		t.Error("fed the whole request to parser, but no completion flag before reuse")
+		t.Error("no completion flag")
 		return
 	} else if err != nil {
 		t.Errorf("got unexpected error before reuse: %s", err)
@@ -60,7 +60,7 @@ func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	err = FeedParser(parser, request, 5)
 
 	if !protocol.Completed {
-		t.Error("fed the whole request to parser, but no completion flag after reuse")
+		t.Error("no completion flag after reuse")
 		return
 	} else if err != nil {
 		t.Errorf("got unexpected error after reuse: %s", err)
