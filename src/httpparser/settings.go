@@ -30,9 +30,8 @@ type Settings struct {
 	InitialPathBufferLength    int
 	InitialHeadersBufferLength int
 
-	maxBufferLength int
-
-	Buffer []byte
+	StartLineBuffer []byte
+	HeadersBuffer   []byte
 }
 
 func PrepareSettings(settings Settings) Settings {
@@ -56,21 +55,13 @@ func PrepareSettings(settings Settings) Settings {
 		settings.InitialHeadersBufferLength = initialHeadersBufferLength
 	}
 
-	{
-		for _, value := range [...]int{
-			settings.MaxPathLength,
-			settings.MaxHeaderLineLength,
-			settings.MaxBodyLength,
-		} {
-			if value > settings.maxBufferLength {
-				settings.maxBufferLength = value
-			}
-		}
-	}
-
-	if settings.Buffer == nil {
+	if settings.StartLineBuffer == nil {
 		// but user still can pass just an empty buffer with capacity he needs
-		settings.Buffer = make([]byte, 0, settings.maxBufferLength)
+		initialLength := settings.InitialPathBufferLength + maxMethodLength + maxProtocolLength
+		settings.StartLineBuffer = make([]byte, 0, initialLength)
+	}
+	if settings.HeadersBuffer == nil {
+		settings.HeadersBuffer = make([]byte, 0, settings.InitialHeadersBufferLength)
 	}
 
 	return settings
