@@ -14,49 +14,76 @@ type Protocol interface {
 	OnPath(path []byte)
 	OnProtocol(protocol []byte)
 	OnHeadersBegin()
-	OnHeader(key, value string)
+	OnHeader(key, value []byte)
 	OnHeadersComplete()
 	OnBody(chunk []byte)
 	OnMessageComplete()
 }
 ```
 
-Example of implemented protocol you can find [here](https://github.com/floordiv/snowdrop-http/blob/master/tests/parser_test.go#L9)
+Example of implemented protocol you can find [here](https://github.com/floordiv/snowdrop-http/blob/master/tests/parser_test.go#L12)
+
+Also parser has settings structure:
+
+```golang
+type Settings struct {
+	// hard limits
+	MaxPathLength       int
+	MaxHeaderLineLength int
+	MaxBodyLength       int
+	MaxChunkLength      int
+
+	// soft limits
+	InitialPathBufferLength    int
+	InitialHeadersBufferLength int
+
+	maxBufferLength int
+
+	Buffer []byte
+}
+```
+
+This settings are passed to parser ALWAYS. It may be even not filled, as parser will fill unfilled with default values you can find in [src/httpparser/settings.go](https://github.com/floordiv/snowdrop-http/src/httpparser/settings.go)
 
 # FAQ
 > *Q*: How does parser behave in case of chunked request?
 
-> *A*: OnBody() callback will be called each time when full chunk was received
+> *A*: OnBody() callback will be called each time when a piece of body was received. It may be even one single byte
 
 <br>
 
 > *Q*: How does parser behave in case of extra-bytes are passed?
 
-> *A*: Parser is stream-based, so parser's lifetime equals to connection lifetime. Protocol methods will be called in a loop, every time, when new data is ready to be pushed
+> *A*: Parser is stream-based, so parser's lifetime equals to connection lifetime. This means that extra-bytes will be parsed as a beginning of the next request
 
 <br>
 
 > *Q*: Can it parse requests that use not CRLF, but just LF?
 
-> *A*: Yes. Parser may parse even requests with mixed usage of CRLF and LF
+> *A*: Yes. Parser can parse even requests with mixed usage of CRLF and LF
 
 <br>
 
 > *Q*: What's if it is not a GET request, but Content-Length is not specified?
 
-> *A*: Request's body will be marked as empty (QA below referrs to this question)
+> *A*: Request's body will be marked as empty (QA below referrs to this question), if "Connection" header is not set to closed (in this case, request body will be parsed until empty bytes array will be passed as a food)
 
 <br>
 
 > *Q*: How will parser behave in case of empty request body?
 
-> *A*: OnBody() won't be called during parsing, but OnMessageComplete() will
+> *A*: OnBody() will be never called, but OnMessageComplete() will
 
 <br>
 
 > *Q*: What will happen if an error will occur?
 
-> *A*: Parser will die (the state of it will be set to Dead forever), and all the attempts to feed it again will return error ParserIsDead
+> *A*: Parser will die (the state of it will be set to "dead" forever), and all the attempts to feed it again will return ParserIsDead error
+
+<br>
+
+> *Q*: What's if an error occurred in protocol callback? 
+> *A*: Currently this feature is in TODO, but soon I will implement it. No, currently callback can not return error
 
 # Example:
 
@@ -64,7 +91,7 @@ Example of implemented protocol you can find [here](https://github.com/floordiv/
 package main
 
 import (
-	httpparser "github.com/floordiv/snowdrop-http/src/snowdrop"
+	"github.com/floordiv/snowdrop-http/src/httpparser"
 )
 
 
@@ -75,8 +102,7 @@ type Protocol struct {
 
 func main() {
 	protocol := Protocol{...}
-	bufferLength := 65535
-	parser := httpparser.NewHTTPRequestParser(&protocol, bufferLength)
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	data := ... // http request taken from any source, with []byte type
 	err := parser.Feed(data)
 	
