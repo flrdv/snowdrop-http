@@ -7,7 +7,7 @@ Currently there are 2 implementations, both can be found in folder src/. `httppa
 # Simple usage:
 This parser is inspired by LLHTTP, as I said before. So, you need to implement a protocol, which is a usual struct, but needs to implement such a methods:
 
-```
+```golang
 type Protocol interface {
 	OnMessageBegin()
 	OnMethod(method []byte)
@@ -43,7 +43,7 @@ type Settings struct {
 }
 ```
 
-This settings are passed to parser ALWAYS. It may be even not filled, as parser will fill unfilled with default values you can find in [src/httpparser/settings.go](https://github.com/floordiv/snowdrop-http/src/httpparser/settings.go)
+This settings are passed to parser ALWAYS. It may be even not filled, as parser will fill unfilled with default values you can find in [src/httpparser/settings.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/src/httpparser/settings.go)
 
 # FAQ
 > *Q*: How does parser behave in case of chunked request?
