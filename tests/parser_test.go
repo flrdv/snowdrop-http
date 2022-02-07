@@ -2,10 +2,11 @@ package httpparser
 
 import (
 	"fmt"
-	"github.com/floordiv/snowdrop/src/httpparser"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/floordiv/snowdrop/src/httpparser"
 )
 
 type Protocol struct {
@@ -361,7 +362,6 @@ func TestParserReuseAbility(t *testing.T) {
 		return
 	}
 
-	//protocol = Protocol{}
 	err = FeedParser(parser, request, 5)
 
 	if !protocol.Completed {
