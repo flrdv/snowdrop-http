@@ -3,7 +3,6 @@ package httpparser
 type (
 	parsingState     uint8
 	chunkedBodyState uint8
-	//ParserState      uint8
 )
 
 const (
@@ -24,16 +23,15 @@ const (
 )
 
 const (
-	chunkBody chunkedBodyState = iota + 1
-	chunkLength
+	chunkLength chunkedBodyState = iota + 1
+	chunkLengthCR
 
-	/* Started splitter AFTER chunk length */
-	splitterChunkLengthBegin
-	splitterChunkLengthCR
+	chunkBody
+	chunkBodyEnd
+	chunkBodyCR
 
-	/* Started splitter AFTER chunk body */
-	splitterChunkBodyBegin
-	splitterChunkBodyCR
+	lastChunk
+	lastChunkCR
 
 	transferCompleted
 )
