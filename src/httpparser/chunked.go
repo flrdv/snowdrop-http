@@ -5,34 +5,25 @@ type OnBodyCallback func([]byte)
 type chunkedBodyParser struct {
 	callback       OnBodyCallback
 	state          chunkedBodyState
-	buffer         []byte
 	chunkLength    int
-	bytesReceived  int
-	chunksReceived int
+	chunkBodyBegin int
 
-	maxChunkSize       int
-	chunkSizeHexLength int
-	chunkSizeBits      int
+	maxChunkSize int
 }
 
 func NewChunkedBodyParser(callback OnBodyCallback, maxChunkSize int) *chunkedBodyParser {
-	chunkSizeBits := getIntBits(maxChunkSize)
-
 	return &chunkedBodyParser{
-		callback:           callback,
-		state:              chunkLength,
-		buffer:             make([]byte, 0, maxChunkSize),
-		maxChunkSize:       maxChunkSize,
-		chunkSizeBits:      getIntBits(maxChunkSize),
-		chunkSizeHexLength: chunkSizeBits / 4,
+		callback: callback,
+		state:    chunkLength,
+		// as chunked requests aren't obligatory, we better keep the buffer unallocated until
+		// we'll need it
+		maxChunkSize: maxChunkSize,
 	}
 }
 
 func (p *chunkedBodyParser) Clear() {
 	p.state = chunkLength
 	p.chunkLength = 0
-	p.buffer = p.buffer[:0]
-	p.chunksReceived = 0
 }
 
 func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err error) {
@@ -40,7 +31,8 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 		/*
 			It returns extra-bytes as parser must know, that it's his job now
 
-			But if parser is feeding again, it means only that
+			But if parser is feeding again, it means only that we really need
+			to parse one more chunked body
 		*/
 		p.Clear()
 	}
@@ -53,129 +45,111 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 		case chunkLength:
 			switch char {
 			case '\r':
-				if p.chunkLength, err = parseHex(p.buffer); err != nil {
-					p.complete()
-
-					return true, nil, err
-				}
-
-				p.state = splitterChunkLengthCR
-				p.buffer = p.buffer[:0]
+				p.state = chunkLengthCR
 			case '\n':
-				if p.chunkLength, err = parseHex(p.buffer); err != nil {
-					p.complete()
-
-					return true, nil, err
+				if p.chunkLength == 0 {
+					p.state = lastChunk
+					break
 				}
 
+				p.chunkBodyBegin = i + 1
 				p.state = chunkBody
-				p.buffer = p.buffer[:0]
 			default:
-				// TODO: add support for trailers
-				p.buffer = append(p.buffer, char)
+				// TODO: add support of trailers
+				// TODO: replace with ascii.IsPrint()
+				if (char < '0' && char > '9') && (char < 'a' && char > 'f') && (char < 'A' && char > 'F') {
+					// non-printable ascii-character
+					p.complete()
 
-				if len(p.buffer) > p.chunkSizeHexLength {
+					return true, nil, InvalidChunkSize
+				}
+
+				p.chunkLength = (p.chunkLength << 4) + int((char&0xF)+9*(char>>6))
+
+				if p.chunkLength > p.maxChunkSize {
 					p.complete()
 
 					return true, nil, TooBigChunkSize
 				}
 			}
-		case chunkBody:
-			if p.chunkLength == 0 {
-				if char == '\r' {
-					p.state = splitterChunkBodyCR
-					continue
-				} else if char == '\n' {
-					p.complete()
-
-					return true, data[i+1:], nil
-				} else {
-					p.complete()
-
-					return true, nil, InvalidChunkSplitter
-				}
-			}
-
-			p.buffer = append(p.buffer, char)
-
-			if len(p.buffer) == p.chunkLength {
-				p.state = splitterChunkBodyBegin
-				p.callback(p.buffer)
-				p.buffer = p.buffer[:0]
-			}
-		case splitterChunkLengthBegin:
-			switch char {
-			case '\r':
-				p.state = splitterChunkLengthCR
-			case '\n':
-				p.state = chunkBody
-			default:
-				p.complete()
-
-				return true, nil, InvalidChunkSplitter
-			}
-		case splitterChunkLengthCR:
+		case chunkLengthCR:
 			if char != '\n' {
 				p.complete()
 
 				return true, nil, InvalidChunkSplitter
 			}
 
+			if p.chunkLength == 0 {
+				p.state = lastChunk
+				break
+			}
+
+			p.chunkBodyBegin = i + 1
 			p.state = chunkBody
-		case splitterChunkBodyBegin:
+		case chunkBody:
+			p.chunkLength--
+
+			if p.chunkLength == 0 {
+				p.state = chunkBodyEnd
+			}
+		case chunkBodyEnd:
+			p.callback(data[p.chunkBodyBegin:i])
+
 			switch char {
 			case '\r':
-				p.state = splitterChunkBodyCR
+				p.state = chunkBodyCR
 			case '\n':
-				if p.chunkLength == 0 {
-					p.complete()
-
-					return true, data[i+1:], nil
-				}
-
 				p.state = chunkLength
 			default:
 				p.complete()
 
 				return true, nil, InvalidChunkSplitter
 			}
-		case splitterChunkBodyCR:
+		case chunkBodyCR:
 			if char != '\n' {
 				p.complete()
 
 				return true, nil, InvalidChunkSplitter
 			}
 
-			if p.chunkLength == 0 {
+			p.state = chunkLength
+		case lastChunk:
+			switch char {
+			case '\r':
+				p.state = lastChunkCR
+			case '\n':
 				p.complete()
 
 				return true, data[i+1:], nil
+			default:
+				// looks sad, received everything, and fucked up in the end
+				// or this was made for special? Oh god
+				p.complete()
+
+				return true, nil, InvalidChunkSplitter
+			}
+		case lastChunkCR:
+			if char != '\n' {
+				p.complete()
+
+				return true, nil, InvalidChunkSplitter
 			}
 
-			p.state = chunkLength
+			p.complete()
+
+			return true, data[i+1:], nil
 		}
 	}
+
+	if p.state == chunkBody {
+		p.callback(data[p.chunkBodyBegin:])
+	}
+
+	p.chunkBodyBegin = 0
 
 	return false, nil, nil
 }
 
 func (p *chunkedBodyParser) complete() {
 	p.state = transferCompleted
-}
-
-// https://stackoverflow.com/questions/2274428/how-to-determine-how-many-bytes-an-integer-needs/2274457
-func getIntBits(x int) int {
-	if x < 0x10000 {
-		if x < 0x100 {
-			return 8
-		} else {
-			return 16
-		}
-	} else {
-		if x < 0x100000000 {
-			return 32
-		} else {
-			return 64
-		}
-	}
 }
