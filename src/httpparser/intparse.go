@@ -20,22 +20,3 @@ func parseUint(raw []byte) (num int, err error) {
 
 	return num, nil
 }
-
-func parseHex(raw []byte) (num int, err error) {
-	/*
-		Tiny implementation of strconv.ParseUint(raw, 16, 0), but made custom for myself,
-		as I don't need all that stuff from strconv.ParseUint()
-
-		Input data MUST be in lower-case
-	*/
-
-	for _, char := range raw {
-		if (char < '0' && char > '9') && (char < 'a' && char > 'f') && (char < 'A' && char > 'F') {
-			return 0, InvalidChunkSize
-		}
-
-		num = (num << 4) + int((char&0xF)+9*(char>>6))
-	}
-
-	return num, nil
-}
