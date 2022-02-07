@@ -61,7 +61,7 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 					// non-printable ascii-character
 					p.complete()
 
-					return true, nil, InvalidChunkSize
+					return true, nil, ErrInvalidChunkSize
 				}
 
 				p.chunkLength = (p.chunkLength << 4) + int((char&0xF)+9*(char>>6))
@@ -69,14 +69,14 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 				if p.chunkLength > p.maxChunkSize {
 					p.complete()
 
-					return true, nil, TooBigChunkSize
+					return true, nil, ErrTooBigChunkSize
 				}
 			}
 		case chunkLengthCR:
 			if char != '\n' {
 				p.complete()
 
-				return true, nil, InvalidChunkSplitter
+				return true, nil, ErrInvalidChunkSplitter
 			}
 
 			if p.chunkLength == 0 {
@@ -103,13 +103,13 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 			default:
 				p.complete()
 
-				return true, nil, InvalidChunkSplitter
+				return true, nil, ErrInvalidChunkSplitter
 			}
 		case chunkBodyCR:
 			if char != '\n' {
 				p.complete()
 
-				return true, nil, InvalidChunkSplitter
+				return true, nil, ErrInvalidChunkSplitter
 			}
 
 			p.state = chunkLength
@@ -126,13 +126,13 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 				// or this was made for special? Oh god
 				p.complete()
 
-				return true, nil, InvalidChunkSplitter
+				return true, nil, ErrInvalidChunkSplitter
 			}
 		case lastChunkCR:
 			if char != '\n' {
 				p.complete()
 
-				return true, nil, InvalidChunkSplitter
+				return true, nil, ErrInvalidChunkSplitter
 			}
 
 			p.complete()

@@ -191,17 +191,17 @@ func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 
 func TestInvalidGETRequestMissingMethod(t *testing.T) {
 	request := []byte("/ HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidMethod)
 }
 
 func TestInvalidGETRequestEmptyMethod(t *testing.T) {
 	request := []byte(" / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidMethod)
 }
 
 func TestInvalidGETRequestInvalidMethod(t *testing.T) {
 	request := []byte("GETP / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidMethod)
 }
 
 func TestInvalidPOSTRequestExtraBody(t *testing.T) {
@@ -211,10 +211,10 @@ func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	err := FeedParser(parser, request, 5)
 
 	if err == nil {
-		t.Error("no errors occurred whenever they have to")
+		t.Error("no errors occurred whenever they had to")
 		return
 	}
-	if err != httpparser.InvalidMethod {
+	if err != httpparser.ErrInvalidMethod {
 		/*
 			As we have a stream-based parser, we expect that extra-body always mean a new request
 			So that's why we expect here InvalidMethod error: " Extra" is really invalid method
@@ -227,27 +227,27 @@ func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 
 func TestInvalidGETRequestUnknownProtocol(t *testing.T) {
 	request := []byte("GET / HTTP/1.2\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.ProtocolNotSupported)
+	testInvalidGETRequest(t, request, httpparser.ErrProtocolNotSupported)
 }
 
 func TestInvalidGETRequestEmptyPath(t *testing.T) {
 	request := []byte("GET  HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidPath)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidPath)
 }
 
 func TestInvalidGETRequestMissingPath(t *testing.T) {
 	request := []byte("GET HTTP/1.2\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidPath)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidPath)
 }
 
 func TestInvalidGETRequestInvalidHeader(t *testing.T) {
 	request := []byte("GET / HTTP/1.1\r\nContent-Type some content type\r\nHost: rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidHeader)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidHeader)
 }
 
 func TestInvalidGETRequestNoSpaces(t *testing.T) {
 	request := []byte("GET/HTTP/1.1\r\nContent-Typesomecontenttype\r\nHost:rush.dev\r\n\r\n")
-	testInvalidGETRequest(t, request, httpparser.InvalidMethod)
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidMethod)
 }
 
 func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
@@ -277,7 +277,7 @@ func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 		t.Errorf("parser returned error: %s\n", err)
 		return
 	} else if !protocol.Completed {
-		t.Error("the whole request was fed to parser but he does not think so")
+		t.Error("no completion flag")
 		return
 	}
 

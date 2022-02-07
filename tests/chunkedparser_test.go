@@ -132,7 +132,7 @@ func TestChunkOverflow(t *testing.T) {
 		return
 	}
 
-	if err != httpparser.InvalidChunkSplitter {
+	if err != httpparser.ErrInvalidChunkSplitter {
 		t.Errorf(`expected InvalidChunkSplitter error, got msg="%s"`, err.Error())
 		return
 	}
@@ -155,7 +155,7 @@ func TestChunkTooSmall(t *testing.T) {
 		return
 	}
 
-	if err != httpparser.InvalidChunkSplitter {
+	if err != httpparser.ErrInvalidChunkSplitter {
 		t.Errorf(`expected InvalidChunkSplitter error, got msg="%s"`, err.Error())
 		return
 	}

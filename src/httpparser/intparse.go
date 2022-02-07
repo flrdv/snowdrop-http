@@ -12,7 +12,7 @@ func parseUint(raw []byte) (num int, err error) {
 		char -= '0'
 
 		if char > 9 {
-			return 0, InvalidContentLength
+			return 0, ErrInvalidContentLength
 		}
 
 		num = num*10 + int(char)
