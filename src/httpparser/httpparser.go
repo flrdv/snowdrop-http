@@ -64,12 +64,11 @@ func (p *httpRequestParser) Clear() {
 	p.reqInfoBuff = p.reqInfoBuff[:0]
 }
 
+/*
+	This parser is absolutely stand-alone. It's like a separated sub-system in every
+	server, because everything you need is just to feed it
+*/
 func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
-	/*
-		This parser is absolutely stand-alone. It's like a separated sub-system in every
-		server, because everything you need is just to feed it
-	*/
-
 	if len(data) == 0 {
 		return nil
 	}
@@ -216,7 +215,6 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			}
 
 			if char != ' ' {
-				// TODO: only printable ascii and non-escape characters are allowed, so here I must check it, too
 				p.buffer = append(p.buffer, char)
 			}
 		case headerValue:
