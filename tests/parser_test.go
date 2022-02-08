@@ -1,6 +1,7 @@
 package httpparser
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -211,7 +212,7 @@ func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	err := FeedParser(parser, request, 5)
 
 	if err == nil {
-		t.Error("no errors occurred whenever they had to")
+		t.Error("expected error, but no error was returned")
 		return
 	}
 	if err != httpparser.ErrInvalidMethod {
@@ -370,5 +371,40 @@ func TestParserReuseAbility(t *testing.T) {
 	} else if err != nil {
 		t.Errorf("got unexpected error: %s", err)
 		return
+	}
+}
+
+func TestConnectionClose(t *testing.T) {
+	protocol := Protocol{}
+	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+
+	body := "Hello, I have a body for you!"
+	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nConnection: close\r\n\r\n" + body)
+	err := FeedParser(parser, request, 5)
+
+	if protocol.Completed {
+		t.Error("got unexpected completion flag")
+		return
+	} else if err != nil {
+		t.Error("unexpected error:", err.Error())
+		return
+	}
+
+	// hope it's necessary to check method, path, protocol and headers after so many tests
+
+	if !bytes.Equal(protocol.Body, []byte(body)) {
+		t.Errorf("mismatching wanted and real body: wanted \"%s\", got %s", body, quote(protocol.Body))
+		return
+	}
+
+	// on Connection: close header, the finish is connection close
+	// in this case, reading from socket returns empty byte
+	// and this will be a completion mark for our parser
+	err = parser.Feed([]byte{})
+
+	if !protocol.Completed {
+		t.Error("no completion mark")
+	} else if err != httpparser.ErrConnectionClosed {
+		t.Error("expected ErrConnectionClosed error, got", err.Error())
 	}
 }
