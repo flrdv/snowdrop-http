@@ -34,13 +34,12 @@ type Settings struct {
 	InitialPathBufferLength    int
 	InitialHeadersBufferLength int
 
-	maxBufferLength int
-
-	Buffer []byte
+	StartLineBuffer []byte
+	HeadersBuffer   []byte
 }
 ```
 
-This settings are passed to parser ALWAYS. It may be even not filled, as parser will fill unfilled with default values you can find in [src/httpparser/settings.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/src/httpparser/settings.go)
+This settings are passed to parser ALWAYS. It may be even not specified as parser will set unspecified values with default ones. If buffers aren't specified, they will be allocated automatically. All this stuff you can find in [src/httpparser/settings.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/src/httpparser/settings.go)
 
 # FAQ
 > *Q*: How does parser behave in case of chunked request?
