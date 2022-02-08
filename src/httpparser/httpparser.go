@@ -9,7 +9,7 @@ var (
 	transferEncoding = []byte("transfer-encoding")
 	connection       = []byte("connection")
 	chunked          = []byte("chunked")
-	close            = []byte("close")
+	closeConnection  = []byte("close")
 )
 
 type IProtocol interface {
@@ -271,7 +271,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				// TODO: maybe, there are some more chunked transfers?
 				p.isChunked = EqualFold(chunked, value)
 			} else if EqualFold(connection, key) {
-				p.closeConnection = EqualFold(close, value)
+				p.closeConnection = EqualFold(closeConnection, value)
 			}
 
 			switch char {
