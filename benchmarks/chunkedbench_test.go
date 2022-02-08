@@ -3,8 +3,9 @@ package httpparser
 import (
 	"bytes"
 	"fmt"
-	"github.com/floordiv/snowdrop/src/httpparser"
 	"testing"
+
+	"github.com/floordiv/snowdrop/httpparser"
 )
 
 func BenchmarkSmallChunkedBody(b *testing.B) {
