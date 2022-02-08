@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/floordiv/snowdrop/src/httpparser"
+	"github.com/floordiv/snowdrop/httpparser"
 )
 
 type Protocol struct {
