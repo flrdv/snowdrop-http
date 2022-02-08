@@ -1,13 +1,15 @@
 package httpparser
 
 import (
-	ascii "github.com/scott-ainsworth/go-ascii"
+	"github.com/scott-ainsworth/go-ascii"
 )
 
 var (
 	contentLength    = []byte("content-length")
 	transferEncoding = []byte("transfer-encoding")
+	connection       = []byte("connection")
 	chunked          = []byte("chunked")
+	close            = []byte("close")
 )
 
 type IProtocol interface {
@@ -23,45 +25,44 @@ type IProtocol interface {
 }
 type httpRequestParser struct {
 	protocol IProtocol
+	settings Settings
 
-	state             parsingState
-	headerValueBegin  uint
-	buffer            []byte
-	reqInfoBuff       []byte
-	reqInfoBuffOffset int
+	state               parsingState
+	headerValueBegin    uint
+	headersBuffer       []byte
+	startLineBuff       []byte
+	startLineBuffOffset uint
 
-	maxBufferLength   int
-	contentLength     int
-	bodyBytesReceived int
+	bodyBytesLeft int
 
-	isChunked    bool
-	chunksParser *chunkedBodyParser
+	closeConnection bool
+	isChunked       bool
+	chunksParser    *chunkedBodyParser
 }
 
 /*
 	Returns new initialized instance of parser
 */
 func NewHTTPRequestParser(protocol IProtocol, settings Settings) *httpRequestParser {
-	settings = PrepareSettings(settings)
 	protocol.OnMessageBegin()
+	settings = PrepareSettings(settings)
 
 	return &httpRequestParser{
-		protocol:        protocol,
-		maxBufferLength: settings.maxBufferLength,
-		buffer:          settings.Buffer,
-		reqInfoBuff:     make([]byte, 0, maxMethodLength+settings.MaxPathLength+maxProtocolLength),
-		chunksParser:    NewChunkedBodyParser(protocol.OnBody, settings.MaxChunkLength),
-		state:           method,
+		protocol:      protocol,
+		settings:      settings,
+		headersBuffer: settings.HeadersBuffer,
+		startLineBuff: settings.StartLineBuffer,
+		chunksParser:  NewChunkedBodyParser(protocol.OnBody, settings.MaxChunkLength),
+		state:         method,
 	}
 }
 
 func (p *httpRequestParser) Clear() {
 	p.state = method
-	p.contentLength = 0
-	p.bodyBytesReceived = 0
 	p.isChunked = false
-	p.buffer = p.buffer[:0]
-	p.reqInfoBuff = p.reqInfoBuff[:0]
+	p.headersBuffer = p.headersBuffer[:0]
+	p.startLineBuff = p.startLineBuff[:0]
+	p.startLineBuffOffset = 0
 }
 
 /*
@@ -70,12 +71,19 @@ func (p *httpRequestParser) Clear() {
 */
 func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 	if len(data) == 0 {
+		if p.closeConnection {
+			p.die()
+
+			// to let server know that we received everything, and it's time to close the connection
+			return ErrConnectionClosed
+		}
+
 		return nil
 	}
 
 	switch p.state {
 	case dead:
-		return ParserIsDead
+		return ErrParserIsDead
 	case body:
 		done, extra, err := p.pushBodyPiece(data)
 
@@ -102,49 +110,49 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 		switch p.state {
 		case method:
 			if char == ' ' {
-				if !IsMethodValid(p.reqInfoBuff) {
+				if !IsMethodValid(p.startLineBuff) {
 					p.die()
 
-					return InvalidMethod
+					return ErrInvalidMethod
 				}
 
-				p.protocol.OnMethod(p.reqInfoBuff)
-				p.reqInfoBuffOffset = len(p.reqInfoBuff)
+				p.protocol.OnMethod(p.startLineBuff)
+				p.startLineBuffOffset = uint(len(p.startLineBuff))
 				p.state = path
-				continue
+				break
 			}
 
-			p.reqInfoBuff = append(p.reqInfoBuff, char)
+			p.startLineBuff = append(p.startLineBuff, char)
 
-			if len(p.reqInfoBuff) > maxMethodLength {
+			if len(p.startLineBuff) > maxMethodLength {
 				p.die()
 
-				return InvalidMethod
+				return ErrInvalidMethod
 			}
 		case path:
 			if char == ' ' {
-				if len(p.reqInfoBuff) == p.reqInfoBuffOffset {
+				if uint(len(p.startLineBuff)) == p.startLineBuffOffset {
 					p.die()
 
-					return InvalidPath
+					return ErrInvalidPath
 				}
 
-				p.protocol.OnPath(p.reqInfoBuff[p.reqInfoBuffOffset:])
-				p.reqInfoBuffOffset += len(p.reqInfoBuff[p.reqInfoBuffOffset:])
+				p.protocol.OnPath(p.startLineBuff[p.startLineBuffOffset:])
+				p.startLineBuffOffset += uint(len(p.startLineBuff[p.startLineBuffOffset:]))
 				p.state = protocol
 				continue
 			} else if !ascii.IsPrint(char) {
 				p.die()
 
-				return InvalidPath
+				return ErrInvalidPath
 			}
 
-			p.reqInfoBuff = append(p.reqInfoBuff, char)
+			p.startLineBuff = append(p.startLineBuff, char)
 
-			if len(p.reqInfoBuff[p.reqInfoBuffOffset:]) > p.maxBufferLength {
+			if len(p.startLineBuff[p.startLineBuffOffset:]) > p.settings.MaxPathLength {
 				p.die()
 
-				return BufferOverflow
+				return ErrBufferOverflow
 			}
 		case protocol:
 			switch char {
@@ -153,57 +161,57 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			case '\n':
 				p.state = protocolLF
 			default:
-				p.reqInfoBuff = append(p.reqInfoBuff, char)
+				p.startLineBuff = append(p.startLineBuff, char)
 
-				if len(p.reqInfoBuff[p.reqInfoBuffOffset:]) > maxProtocolLength {
+				if len(p.startLineBuff[p.startLineBuffOffset:]) > maxProtocolLength {
 					p.die()
 
-					return BufferOverflow
+					return ErrBufferOverflow
 				}
 			}
 		case protocolCR:
 			if char != '\n' {
 				p.die()
 
-				return RequestSyntaxError
+				return ErrRequestSyntaxError
 			}
 
 			p.state = protocolLF
 		case protocolLF:
-			if !IsProtocolSupported(p.reqInfoBuff[p.reqInfoBuffOffset:]) {
+			if !IsProtocolSupported(p.startLineBuff[p.startLineBuffOffset:]) {
 				p.die()
 
-				return ProtocolNotSupported
+				return ErrProtocolNotSupported
 			}
 
-			p.protocol.OnProtocol(p.reqInfoBuff[p.reqInfoBuffOffset:])
+			p.protocol.OnProtocol(p.startLineBuff[p.startLineBuffOffset:])
 			p.protocol.OnHeadersBegin()
 
-			p.buffer = append(p.buffer[:0], char)
+			p.headersBuffer = append(p.headersBuffer[:0], char)
 			p.state = headerKey
 		case headerKey:
 			if char == ':' {
-				if len(p.buffer) == 0 {
+				if len(p.headersBuffer) == 0 {
 					p.die()
 
-					return InvalidHeader
+					return ErrInvalidHeader
 				}
 
 				p.state = headerColon
-				p.headerValueBegin = uint(len(p.buffer))
+				p.headerValueBegin = uint(len(p.headersBuffer))
 				continue
 			} else if !ascii.IsPrint(char) {
 				p.die()
 
-				return InvalidHeader
+				return ErrInvalidHeader
 			}
 
-			p.buffer = append(p.buffer, char)
+			p.headersBuffer = append(p.headersBuffer, char)
 
-			if len(p.buffer) > p.maxBufferLength {
+			if len(p.headersBuffer) >= p.settings.MaxHeaderLineLength {
 				p.die()
 
-				return BufferOverflow
+				return ErrBufferOverflow
 			}
 		case headerColon:
 			p.state = headerValue
@@ -211,11 +219,11 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			if !ascii.IsPrint(char) {
 				p.die()
 
-				return InvalidHeader
+				return ErrInvalidHeader
 			}
 
 			if char != ' ' {
-				p.buffer = append(p.buffer, char)
+				p.headersBuffer = append(p.headersBuffer, char)
 			}
 		case headerValue:
 			switch char {
@@ -227,40 +235,42 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				if !ascii.IsPrint(char) {
 					p.die()
 
-					return InvalidHeader
+					return ErrInvalidHeader
 				}
 
-				p.buffer = append(p.buffer, char)
+				p.headersBuffer = append(p.headersBuffer, char)
 
-				if len(p.buffer) > p.maxBufferLength {
+				if len(p.headersBuffer) > p.settings.MaxHeaderLineLength {
 					p.die()
 
-					return BufferOverflow
+					return ErrBufferOverflow
 				}
 			}
 		case headerValueCR:
 			if char != '\n' {
 				p.die()
 
-				return RequestSyntaxError
+				return ErrRequestSyntaxError
 			}
 
 			p.state = headerValueLF
 		case headerValueLF:
-			key, value := p.buffer[:p.headerValueBegin], p.buffer[p.headerValueBegin:]
+			key, value := p.headersBuffer[:p.headerValueBegin], p.headersBuffer[p.headerValueBegin:]
 			p.protocol.OnHeader(key, value)
 
 			if EqualFold(contentLength, key) {
 				var err error
 
-				if p.contentLength, err = parseUint(value); err != nil {
+				if p.bodyBytesLeft, err = parseUint(value); err != nil {
 					p.die()
 
-					return InvalidContentLength
+					return ErrInvalidContentLength
 				}
 			} else if EqualFold(transferEncoding, key) {
 				// TODO: maybe, there are some more chunked transfers?
 				p.isChunked = EqualFold(chunked, value)
+			} else if EqualFold(connection, key) {
+				p.closeConnection = EqualFold(close, value)
 			}
 
 			switch char {
@@ -269,15 +279,15 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			case '\n':
 				p.state = body
 			default:
-				p.buffer = append(p.buffer[:0], char)
+				p.headersBuffer = append(p.headersBuffer[:0], char)
 				p.state = headerKey
 			}
 		case headerValueDoubleCR:
 			if char != '\n' {
 				p.die()
 
-				return RequestSyntaxError
-			} else if p.contentLength == 0 && !p.isChunked {
+				return ErrRequestSyntaxError
+			} else if p.bodyBytesLeft == 0 && !p.isChunked {
 				// TODO: save state of connection, so in case of Connection: close, I could just
 				//		 receive body infinite until parser.Feed() function won't be called with
 				//		 empty bytes slice
@@ -286,6 +296,14 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				p.protocol.OnMessageComplete()
 				p.protocol.OnMessageBegin()
 				continue
+			}
+
+			if p.closeConnection {
+				p.state = bodyConnectionClose
+				// anyway in case of empty bytes data it will stop parsing, so it's safe
+				// but also keeps amount of body bytes limited
+				p.bodyBytesLeft = p.settings.MaxBodyLength
+				break
 			}
 
 			p.state = body
@@ -309,6 +327,14 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			}
 
 			return nil
+		case bodyConnectionClose:
+			p.bodyBytesLeft -= len(data[i:])
+
+			if p.bodyBytesLeft < 0 {
+				p.die()
+
+				return ErrBodyTooBig
+			}
 		}
 	}
 
@@ -318,8 +344,8 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 func (p *httpRequestParser) die() {
 	p.state = dead
 	// anyway we don't need them anymore
-	p.buffer = nil
-	p.reqInfoBuff = nil
+	p.headersBuffer = nil
+	p.startLineBuff = nil
 }
 
 func (p *httpRequestParser) pushBodyPiece(data []byte) (done bool, extra []byte, err error) {
@@ -330,28 +356,22 @@ func (p *httpRequestParser) pushBodyPiece(data []byte) (done bool, extra []byte,
 	}
 
 	dataLen := len(data)
-	bodyBytesLeft := p.contentLength - p.bodyBytesReceived
 
-	if bodyBytesLeft > dataLen {
-		bodyBytesLeft = dataLen
+	if p.bodyBytesLeft > dataLen {
+		p.protocol.OnBody(data)
+		p.bodyBytesLeft -= dataLen
+
+		return false, nil, nil
 	}
 
-	if bodyBytesLeft <= 0 {
+	if p.bodyBytesLeft <= 0 {
+		// already?? Looks like a bug
 		return true, data, nil
 	}
 
-	p.protocol.OnBody(data[:bodyBytesLeft])
-	p.bodyBytesReceived += dataLen
+	p.protocol.OnBody(data[:p.bodyBytesLeft])
 
-	if p.bodyBytesReceived >= p.contentLength {
-		if p.bodyBytesReceived-p.contentLength > 0 {
-			return true, data[bodyBytesLeft:], nil
-		}
-
-		return true, nil, nil
-	}
-
-	return false, nil, nil
+	return true, data[p.bodyBytesLeft:], nil
 }
 
 func IsProtocolSupported(proto []byte) (isSupported bool) {
