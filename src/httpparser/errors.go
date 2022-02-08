@@ -16,5 +16,6 @@ var (
 	ErrInvalidChunkSize     = errors.New("chunk size is invalid hexdecimal value")
 	ErrInvalidChunkSplitter = errors.New("invalid splitter")
 
-	ErrParserIsDead = errors.New("once error occurred, parser cannot be used anymore")
+	ErrConnectionClosed = errors.New("connection is closed, body has been received")
+	ErrParserIsDead     = errors.New("once error occurred, parser cannot be used anymore")
 )
