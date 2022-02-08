@@ -1,13 +1,13 @@
 package httpparser
 
 import (
-	"github.com/floordiv/snowdrop/src/httpparser"
+	httpparser2 "github.com/floordiv/snowdrop/httpparser"
 	"testing"
 )
 
 func TestParserReuseAbilityChunkedRequest(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser := httpparser2.NewHTTPRequestParser(&protocol, httpparser2.Settings{})
 
 	request := []byte("POST / HTTP/1.1\r\n" +
 		"Content-Type: some content type\r\n" +
@@ -95,7 +95,7 @@ func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 	expectBody := "Hello, world!But what's wrong with you?Finally am here"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser := httpparser2.NewHTTPRequestParser(&protocol, httpparser2.Settings{})
 	err := parser.Feed([]byte(request))
 
 	if err != nil {
@@ -117,7 +117,7 @@ func TestChunkedTransferEncodingFullRequestBody(t *testing.T) {
 
 func TestChunkOverflow(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+	parser := httpparser2.NewChunkedBodyParser(protocol.OnBody, 65535)
 	data := []byte("d\r\nHello, world! Overflow here\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
 
 	done, _, err := parser.Feed(data)
@@ -132,7 +132,7 @@ func TestChunkOverflow(t *testing.T) {
 		return
 	}
 
-	if err != httpparser.ErrInvalidChunkSplitter {
+	if err != httpparser2.ErrInvalidChunkSplitter {
 		t.Errorf(`expected InvalidChunkSplitter error, got msg="%s"`, err.Error())
 		return
 	}
@@ -140,7 +140,7 @@ func TestChunkOverflow(t *testing.T) {
 
 func TestChunkTooSmall(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+	parser := httpparser2.NewChunkedBodyParser(protocol.OnBody, 65535)
 	data := []byte("d\r\nHello, ...\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
 
 	done, _, err := parser.Feed(data)
@@ -155,7 +155,7 @@ func TestChunkTooSmall(t *testing.T) {
 		return
 	}
 
-	if err != httpparser.ErrInvalidChunkSplitter {
+	if err != httpparser2.ErrInvalidChunkSplitter {
 		t.Errorf(`expected InvalidChunkSplitter error, got msg="%s"`, err.Error())
 		return
 	}
@@ -163,7 +163,7 @@ func TestChunkTooSmall(t *testing.T) {
 
 func TestMixChunkSplitters(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+	parser := httpparser2.NewChunkedBodyParser(protocol.OnBody, 65535)
 	data := []byte("d\r\nHello, world!\n1a\r\nBut what's wrong with you?\nf\nFinally am here\r\n0\r\n\n")
 
 	done, _, err := parser.Feed(data)
@@ -184,7 +184,7 @@ func TestWithDifferentBlockSizes(t *testing.T) {
 	data := []byte("d\r\nHello, world!\r\n1a\r\nBut what's wrong with you?\r\nf\r\nFinally am here\r\n0\r\n\r\n")
 
 	for i := 1; i <= len(data); i++ {
-		parser := httpparser.NewChunkedBodyParser(protocol.OnBody, 65535)
+		parser := httpparser2.NewChunkedBodyParser(protocol.OnBody, 65535)
 
 		for j := 0; j < len(data); j += i {
 			end := j + i
