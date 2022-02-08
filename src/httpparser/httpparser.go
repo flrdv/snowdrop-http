@@ -72,6 +72,7 @@ func (p *httpRequestParser) Clear() {
 func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 	if len(data) == 0 {
 		if p.closeConnection {
+			p.protocol.OnMessageComplete()
 			p.die()
 
 			// to let server know that we received everything, and it's time to close the connection
@@ -277,6 +278,11 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			case '\r':
 				p.state = headerValueDoubleCR
 			case '\n':
+				if p.closeConnection {
+					p.state = bodyConnectionClose
+					break
+				}
+
 				p.state = body
 			default:
 				p.headersBuffer = append(p.headersBuffer[:0], char)
@@ -287,22 +293,16 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				p.die()
 
 				return ErrRequestSyntaxError
-			} else if p.bodyBytesLeft == 0 && !p.isChunked {
-				// TODO: save state of connection, so in case of Connection: close, I could just
-				//		 receive body infinite until parser.Feed() function won't be called with
-				//		 empty bytes slice
-
-				p.Clear()
-				p.protocol.OnMessageComplete()
-				p.protocol.OnMessageBegin()
-				continue
-			}
-
-			if p.closeConnection {
+			} else if p.closeConnection {
 				p.state = bodyConnectionClose
 				// anyway in case of empty bytes data it will stop parsing, so it's safe
 				// but also keeps amount of body bytes limited
 				p.bodyBytesLeft = p.settings.MaxBodyLength
+				break
+			} else if p.bodyBytesLeft == 0 && !p.isChunked {
+				p.Clear()
+				p.protocol.OnMessageComplete()
+				p.protocol.OnMessageBegin()
 				break
 			}
 
@@ -335,6 +335,10 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 				return ErrBodyTooBig
 			}
+
+			p.protocol.OnBody(data[i:])
+
+			return nil
 		}
 	}
 
