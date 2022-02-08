@@ -259,19 +259,53 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			key, value := p.headersBuffer[:p.headerValueBegin], p.headersBuffer[p.headerValueBegin:]
 			p.protocol.OnHeader(key, value)
 
-			if EqualFold(contentLength, key) {
-				var err error
+			switch len(key) {
+			case len(contentLength):
+				good := true
 
-				if p.bodyBytesLeft, err = parseUint(value); err != nil {
-					p.die()
-
-					return ErrInvalidContentLength
+				for j, character := range contentLength {
+					if character != (key[j] | 0x20) {
+						good = false
+						break
+					}
 				}
-			} else if EqualFold(transferEncoding, key) {
-				// TODO: maybe, there are some more chunked transfers?
-				p.isChunked = EqualFold(chunked, value)
-			} else if EqualFold(connection, key) {
-				p.closeConnection = EqualFold(closeConnection, value)
+
+				if good {
+					var err error
+
+					if p.bodyBytesLeft, err = parseUint(value); err != nil {
+						p.die()
+
+						return ErrInvalidContentLength
+					}
+				}
+			case len(transferEncoding):
+				good := true
+
+				for j, character := range transferEncoding {
+					if character != (key[j] | 0x20) {
+						good = false
+						break
+					}
+				}
+
+				if good {
+					// TODO: maybe, there are some more chunked transfers?
+					p.isChunked = EqualFold(chunked, value)
+				}
+			case len(connection):
+				good := true
+
+				for j, character := range connection {
+					if character != (key[j] | 0x20) {
+						good = false
+						break
+					}
+				}
+
+				if good {
+					p.closeConnection = EqualFold(closeConnection, value)
+				}
 			}
 
 			switch char {
