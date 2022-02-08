@@ -1,8 +1,9 @@
 package httpparser
 
 import (
-	"github.com/floordiv/snowdrop/src/httpparser"
 	"testing"
+
+	"github.com/floordiv/snowdrop/httpparser"
 )
 
 type ProtocolV2 struct{}
