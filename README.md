@@ -6,15 +6,15 @@ This parser is inspired by LLHTTP, as I said before. So, you need to implement a
 
 ```golang
 type Protocol interface {
-	OnMessageBegin()
-	OnMethod(method []byte)
-	OnPath(path []byte)
-	OnProtocol(protocol []byte)
-	OnHeadersBegin()
-	OnHeader(key, value []byte)
-	OnHeadersComplete()
-	OnBody(chunk []byte)
-	OnMessageComplete()
+	OnMessageBegin() error
+	OnMethod([]byte) error
+	OnPath([]byte) error
+	OnProtocol([]byte) error
+	OnHeadersBegin() error
+	OnHeader([]byte, []byte) error
+	OnHeadersComplete() error
+	OnBody([]byte) error
+	OnMessageComplete() error
 }
 ```
 
@@ -100,9 +100,8 @@ func main() {
 	protocol := Protocol{...}
 	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	data := ... // http request taken from any source, with []byte type
-	err := parser.Feed(data)
 	
-	if err != nil {
+	if err := parser.Feed(data); err != nil {
 		// parser isn't able to parse anymore
 		log.Fatal(err)
 	}
