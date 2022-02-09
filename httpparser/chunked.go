@@ -56,7 +56,6 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 				p.state = chunkBody
 			default:
 				// TODO: add support of trailers
-				// TODO: replace with ascii.IsPrint()
 				if (char < '0' && char > '9') && (char < 'a' && char > 'f') && (char < 'A' && char > 'F') {
 					// non-printable ascii-character
 					p.complete()
