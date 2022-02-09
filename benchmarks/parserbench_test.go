@@ -8,15 +8,15 @@ import (
 
 type ProtocolV2 struct{}
 
-func (p ProtocolV2) OnMessageBegin()      {}
-func (p ProtocolV2) OnMethod(_ []byte)    {}
-func (p ProtocolV2) OnPath(_ []byte)      {}
-func (p ProtocolV2) OnProtocol(_ []byte)  {}
-func (p ProtocolV2) OnHeadersBegin()      {}
-func (p ProtocolV2) OnHeader(_, _ []byte) {}
-func (p ProtocolV2) OnHeadersComplete()   {}
-func (p ProtocolV2) OnBody(_ []byte)      {}
-func (p ProtocolV2) OnMessageComplete()   {}
+func (p ProtocolV2) OnMessageBegin() error      { return nil }
+func (p ProtocolV2) OnMethod(_ []byte) error    { return nil }
+func (p ProtocolV2) OnPath(_ []byte) error      { return nil }
+func (p ProtocolV2) OnProtocol(_ []byte) error  { return nil }
+func (p ProtocolV2) OnHeadersBegin() error      { return nil }
+func (p ProtocolV2) OnHeader(_, _ []byte) error { return nil }
+func (p ProtocolV2) OnHeadersComplete() error   { return nil }
+func (p ProtocolV2) OnBody(_ []byte) error      { return nil }
+func (p ProtocolV2) OnMessageComplete() error   { return nil }
 
 var bigChromeRequest = []byte("GET / HTTP/1.1\r\nHost: localhost:8080\r\nConnection: keep-alive\r\nCache-Control: max-age=0" +
 	"\r\nsec-ch-ua: \" Not A;Brand\";v=\"99\", \"Chromium\";v=\"96\", \"Google Chrome\";v=\"96\"" +
@@ -48,7 +48,7 @@ func divideBytes(src []byte, chunkSize int) [][]byte {
 
 func BenchmarkSmallGETRequestBy1Char(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	chars := divideBytes(smallGetRequest, 1)
 
 	b.ResetTimer()
@@ -62,7 +62,7 @@ func BenchmarkSmallGETRequestBy1Char(b *testing.B) {
 
 func BenchmarkSmallGETRequestBy5Chars(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	chars := divideBytes(smallGetRequest, 5)
 
 	b.ResetTimer()
@@ -76,7 +76,7 @@ func BenchmarkSmallGETRequestBy5Chars(b *testing.B) {
 
 func BenchmarkSmallGETRequestFull(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	b.ResetTimer()
 
@@ -87,7 +87,7 @@ func BenchmarkSmallGETRequestFull(b *testing.B) {
 
 func BenchmarkBigChromeRequestBy1Char(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	chars := divideBytes(bigChromeRequest, 1)
 
 	b.ResetTimer()
@@ -101,7 +101,7 @@ func BenchmarkBigChromeRequestBy1Char(b *testing.B) {
 
 func BenchmarkBigChromeRequestBy5Chars(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	chars := divideBytes(bigChromeRequest, 5)
 
 	b.ResetTimer()
@@ -115,7 +115,7 @@ func BenchmarkBigChromeRequestBy5Chars(b *testing.B) {
 
 func BenchmarkBigChromeRequestFull(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	b.ResetTimer()
 
@@ -126,7 +126,7 @@ func BenchmarkBigChromeRequestFull(b *testing.B) {
 
 func BenchmarkBigOwnRequest(b *testing.B) {
 	protocol := ProtocolV2{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	req := []byte("POST /HelloWorldWhatsWrongHerewgfewggrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrre HTTP/1.1\r\n" +
 		"Header1: oergegherkgeklrjgherkgherjkghrekerfgregregregregregrgergergergregehgkerhgkerjhgkrjehgerkhr\r\n" +
 		"Header2: oergegherkgeklrjgherkgherjkghrekerfgregregregregregrgergergergregehgkerhgkerjhgkrjehgerkhr\r\n" +

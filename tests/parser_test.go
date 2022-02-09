@@ -20,37 +20,51 @@ type Protocol struct {
 	CompletedTimes int
 }
 
-func (p *Protocol) OnMessageBegin() {}
+func (p *Protocol) OnMessageBegin() error { return nil }
 
-func (p *Protocol) OnMethod(method []byte) {
+func (p *Protocol) OnMethod(method []byte) error {
 	p.Method = method
+
+	return nil
 }
 
-func (p *Protocol) OnPath(path []byte) {
+func (p *Protocol) OnPath(path []byte) error {
 	p.Path = path
+
+	return nil
 }
 
-func (p *Protocol) OnProtocol(proto []byte) {
+func (p *Protocol) OnProtocol(proto []byte) error {
 	p.Protocol = proto
+
+	return nil
 }
 
-func (p *Protocol) OnHeadersBegin() {
+func (p *Protocol) OnHeadersBegin() error {
 	p.Headers = make(map[string][]byte)
+
+	return nil
 }
 
-func (p *Protocol) OnHeader(key, value []byte) {
+func (p *Protocol) OnHeader(key, value []byte) error {
 	p.Headers[string(key)] = value
+
+	return nil
 }
 
-func (p *Protocol) OnHeadersComplete() {}
+func (p *Protocol) OnHeadersComplete() error { return nil }
 
-func (p *Protocol) OnBody(chunk []byte) {
+func (p *Protocol) OnBody(chunk []byte) error {
 	p.Body = append(p.Body, chunk...)
+
+	return nil
 }
 
-func (p *Protocol) OnMessageComplete() {
+func (p *Protocol) OnMessageComplete() error {
 	p.Completed = true
 	p.CompletedTimes++
+
+	return nil
 }
 
 func (p *Protocol) Clear() {
@@ -124,7 +138,7 @@ func want(
 
 func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	methodExpected := "GET"
 	pathExpected := "/"
@@ -178,7 +192,7 @@ func TestOrdinaryGETRequestParseFull(t *testing.T) {
 
 func testInvalidGETRequest(t *testing.T, request []byte, errorWanted error) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := FeedParser(parser, request, 5)
 
 	if err != nil && err != errorWanted {
@@ -208,7 +222,7 @@ func TestInvalidGETRequestInvalidMethod(t *testing.T) {
 func TestInvalidPOSTRequestExtraBody(t *testing.T) {
 	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nContent-Length: 13\r\n\r\nHello, world! Extra body")
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := FeedParser(parser, request, 5)
 
 	if err == nil {
@@ -253,7 +267,7 @@ func TestInvalidGETRequestNoSpaces(t *testing.T) {
 
 func testOrdinaryPOSTRequestParse(t *testing.T, chunkSize int) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	ordinaryGetRequest := []byte("POST / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev" +
 		"\r\nContent-Length: 13\r\n\r\nHello, world!")
@@ -320,7 +334,7 @@ func TestChromeGETRequest(t *testing.T) {
 		"blqbudgdgdgdgddgdgdgdgdsgsdgsdgdgddgdGWnwfuDG; Goland-1dc491b=e03b2dgdgvdfgad0-b7ab-e4f8e1715c8b\r\n\r\n"
 
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	err := parser.Feed([]byte(request))
 
 	methodExpected := "GET"
@@ -350,7 +364,7 @@ func TestChromeGETRequest(t *testing.T) {
 
 func TestParserReuseAbility(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	request := []byte("GET / HTTP/1.1\r\nContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
 	err := FeedParser(parser, request, 5)
@@ -376,7 +390,7 @@ func TestParserReuseAbility(t *testing.T) {
 
 func TestConnectionClose(t *testing.T) {
 	protocol := Protocol{}
-	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 
 	body := "Hello, I have a body for you!"
 	request := []byte("POST / HTTP/1.1\r\nHost: rush.dev\r\nConnection: close\r\n\r\n" + body)
