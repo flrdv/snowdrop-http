@@ -39,7 +39,7 @@ type Settings struct {
 }
 ```
 
-This settings are passed to parser ALWAYS. It may be even not specified as parser will set unspecified values with default ones. If buffers aren't specified, they will be allocated automatically. All this stuff you can find in [src/httpparser/settings.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/src/httpparser/settings.go)
+This settings are passed to parser ALWAYS. It may be even not specified as parser will set unspecified values with default ones. If buffers aren't specified, they will be allocated automatically. All this stuff you can find in [httpparser/settings.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/httpparser/settings.go)
 
 # FAQ
 > *Q*: How does parser behave in case of chunked request?
@@ -79,7 +79,8 @@ This settings are passed to parser ALWAYS. It may be even not specified as parse
 <br>
 
 > *Q*: What's if an error occurred in protocol callback? 
-> *A*: Currently this feature is in TODO, but soon I will implement it. No, currently callback can not return error
+
+> *A*: Parser will die and return error from callback to server
 
 # Example:
 
@@ -109,3 +110,22 @@ func main() {
 	// that's it! Now everything has been processed with your protocol
 }
 ```
+
+Parser also can return errors:
+- `ErrInvalidMethod`      
+- `ErrInvalidPath`
+- `ErrProtocolNotSupported`
+- `ErrInvalidHeader`
+- `ErrBufferOverflow`
+- `ErrInvalidContentLength`
+- `ErrRequestSyntaxError`
+- `ErrBodyTooBig`
+- `ErrTooBigChunkSize`
+- `ErrInvalidChunkSize`
+- `ErrInvalidChunkSplitter`
+- `ErrConnectionClosed`
+- `ErrParserIsDead`
+
+Important: this is not a finite list of errors may be returned by parser. In case of errors returned from callbacks, parser will die and return error from callback
+
+Details about errors you can find in [httpparser/errors.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/httpparser/errors.go)
