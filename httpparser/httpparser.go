@@ -13,15 +13,15 @@ var (
 )
 
 type IProtocol interface {
-	OnMessageBegin()
-	OnMethod([]byte)
-	OnPath([]byte)
-	OnProtocol([]byte)
-	OnHeadersBegin()
-	OnHeader([]byte, []byte)
-	OnHeadersComplete()
-	OnBody([]byte)
-	OnMessageComplete()
+	OnMessageBegin() error
+	OnMethod([]byte) error
+	OnPath([]byte) error
+	OnProtocol([]byte) error
+	OnHeadersBegin() error
+	OnHeader([]byte, []byte) error
+	OnHeadersComplete() error
+	OnBody([]byte) error
+	OnMessageComplete() error
 }
 type httpRequestParser struct {
 	protocol IProtocol
@@ -43,8 +43,11 @@ type httpRequestParser struct {
 /*
 	Returns new initialized instance of parser
 */
-func NewHTTPRequestParser(protocol IProtocol, settings Settings) *httpRequestParser {
-	protocol.OnMessageBegin()
+func NewHTTPRequestParser(protocol IProtocol, settings Settings) (*httpRequestParser, error) {
+	if err := protocol.OnMessageBegin(); err != nil {
+		return nil, err
+	}
+
 	settings = PrepareSettings(settings)
 
 	return &httpRequestParser{
@@ -54,7 +57,7 @@ func NewHTTPRequestParser(protocol IProtocol, settings Settings) *httpRequestPar
 		startLineBuff: settings.StartLineBuffer,
 		chunksParser:  NewChunkedBodyParser(protocol.OnBody, settings.MaxChunkLength),
 		state:         method,
-	}
+	}, nil
 }
 
 func (p *httpRequestParser) Clear() {
@@ -72,8 +75,11 @@ func (p *httpRequestParser) Clear() {
 func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 	if len(data) == 0 {
 		if p.closeConnection {
-			p.protocol.OnMessageComplete()
 			p.die()
+
+			if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+				return reqErr
+			}
 
 			// to let server know that we received everything, and it's time to close the connection
 			return ErrConnectionClosed
@@ -96,8 +102,18 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 		if done {
 			p.Clear()
-			p.protocol.OnMessageComplete()
-			p.protocol.OnMessageBegin()
+
+			if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+				p.die()
+
+				return err
+			}
+
+			if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
+				p.die()
+
+				return reqErr
+			}
 
 			if len(extra) > 0 {
 				return p.Feed(extra)
@@ -117,7 +133,12 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 					return ErrInvalidMethod
 				}
 
-				p.protocol.OnMethod(p.startLineBuff)
+				if reqErr = p.protocol.OnMethod(p.startLineBuff); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+
 				p.startLineBuffOffset = uint(len(p.startLineBuff))
 				p.state = path
 				break
@@ -138,7 +159,12 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 					return ErrInvalidPath
 				}
 
-				p.protocol.OnPath(p.startLineBuff[p.startLineBuffOffset:])
+				if reqErr = p.protocol.OnPath(p.startLineBuff[p.startLineBuffOffset:]); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+
 				p.startLineBuffOffset += uint(len(p.startLineBuff[p.startLineBuffOffset:]))
 				p.state = protocol
 				continue
@@ -185,8 +211,16 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return ErrProtocolNotSupported
 			}
 
-			p.protocol.OnProtocol(p.startLineBuff[p.startLineBuffOffset:])
-			p.protocol.OnHeadersBegin()
+			if reqErr = p.protocol.OnProtocol(p.startLineBuff[p.startLineBuffOffset:]); reqErr != nil {
+				p.die()
+
+				return reqErr
+			}
+			if reqErr = p.protocol.OnHeadersBegin(); reqErr != nil {
+				p.die()
+
+				return reqErr
+			}
 
 			p.headersBuffer = append(p.headersBuffer[:0], char)
 			p.state = headerKey
@@ -200,7 +234,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 				p.state = headerColon
 				p.headerValueBegin = uint(len(p.headersBuffer))
-				continue
+				break
 			} else if !ascii.IsPrint(char) {
 				p.die()
 
@@ -257,7 +291,12 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			p.state = headerValueLF
 		case headerValueLF:
 			key, value := p.headersBuffer[:p.headerValueBegin], p.headersBuffer[p.headerValueBegin:]
-			p.protocol.OnHeader(key, value)
+
+			if reqErr = p.protocol.OnHeader(key, value); reqErr != nil {
+				p.die()
+
+				return reqErr
+			}
 
 			switch len(key) {
 			case len(contentLength):
@@ -335,8 +374,18 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				break
 			} else if p.bodyBytesLeft == 0 && !p.isChunked {
 				p.Clear()
-				p.protocol.OnMessageComplete()
-				p.protocol.OnMessageBegin()
+
+				if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+				if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+
 				break
 			}
 
@@ -352,8 +401,17 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 			if done {
 				p.Clear()
-				p.protocol.OnMessageComplete()
-				p.protocol.OnMessageBegin()
+
+				if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+				if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
 
 				if err = p.Feed(extra); err != nil {
 					return err
@@ -370,7 +428,11 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return ErrBodyTooBig
 			}
 
-			p.protocol.OnBody(data[i:])
+			if reqErr = p.protocol.OnBody(data[i:]); reqErr != nil {
+				p.die()
+
+				return reqErr
+			}
 
 			return nil
 		}
@@ -396,7 +458,10 @@ func (p *httpRequestParser) pushBodyPiece(data []byte) (done bool, extra []byte,
 	dataLen := len(data)
 
 	if p.bodyBytesLeft > dataLen {
-		p.protocol.OnBody(data)
+		if err = p.protocol.OnBody(data); err != nil {
+			return true, nil, err
+		}
+
 		p.bodyBytesLeft -= dataLen
 
 		return false, nil, nil
@@ -407,7 +472,9 @@ func (p *httpRequestParser) pushBodyPiece(data []byte) (done bool, extra []byte,
 		return true, data, nil
 	}
 
-	p.protocol.OnBody(data[:p.bodyBytesLeft])
+	if err = p.protocol.OnBody(data[:p.bodyBytesLeft]); err != nil {
+		return true, nil, err
+	}
 
 	return true, data[p.bodyBytesLeft:], nil
 }

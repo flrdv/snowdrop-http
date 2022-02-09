@@ -1,6 +1,6 @@
 package httpparser
 
-type OnBodyCallback func([]byte)
+type OnBodyCallback func([]byte) error
 
 type chunkedBodyParser struct {
 	callback       OnBodyCallback
@@ -93,7 +93,11 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 				p.state = chunkBodyEnd
 			}
 		case chunkBodyEnd:
-			p.callback(data[p.chunkBodyBegin:i])
+			if err = p.callback(data[p.chunkBodyBegin:i]); err != nil {
+				p.complete()
+
+				return true, nil, err
+			}
 
 			switch char {
 			case '\r':
@@ -142,7 +146,11 @@ func (p *chunkedBodyParser) Feed(data []byte) (done bool, extraBytes []byte, err
 	}
 
 	if p.state == chunkBody {
-		p.callback(data[p.chunkBodyBegin:])
+		if err = p.callback(data[p.chunkBodyBegin:]); err != nil {
+			p.complete()
+
+			return true, nil, err
+		}
 	}
 
 	p.chunkBodyBegin = 0
