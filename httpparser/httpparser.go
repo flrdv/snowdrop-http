@@ -329,7 +329,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				}
 
 				if good {
-					// TODO: maybe, there are some more chunked transfers?
+					// TODO: maybe, there are some more transfer encodings I must support?
 					p.isChunked = EqualFold(chunked, value)
 				}
 			case len(connection):
