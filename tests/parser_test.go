@@ -161,7 +161,7 @@ func testOrdinaryGETRequestParse(t *testing.T, chunkSize int) {
 		t.Errorf("parser returned error: %s\n", err)
 		return
 	} else if protocol.CompletedTimes != 1 {
-		t.Error("the whole request was fed to parser but he does not think so")
+		t.Error("no completion flag")
 		return
 	}
 
@@ -350,7 +350,7 @@ func TestChromeGETRequest(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while parsing: %s", err)
 	} else if !protocol.Completed {
-		t.Errorf("the whole request was fed to parser but he does not think so")
+		t.Errorf("no completion flag")
 	}
 
 	succeeded, errmsg := want(protocol,
