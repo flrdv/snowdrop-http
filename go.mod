@@ -1,4 +1,4 @@
-module github.com/floordiv/snowdrop
+module github.com/fakefloordiv/snowdrop-http
 
 go 1.16
 

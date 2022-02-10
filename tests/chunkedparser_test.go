@@ -3,7 +3,7 @@ package httpparser
 import (
 	"testing"
 
-	"github.com/floordiv/snowdrop/httpparser"
+	"github.com/fakefloordiv/snowdrop-http/httpparser"
 )
 
 func TestParserReuseAbilityChunkedRequest(t *testing.T) {
