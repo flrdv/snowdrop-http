@@ -27,11 +27,11 @@ type httpRequestParser struct {
 	protocol IProtocol
 	settings Settings
 
-	state               parsingState
-	headerValueBegin    uint
-	headersBuffer       []byte
-	startLineBuff       []byte
-	startLineBuffOffset uint
+	state            parsingState
+	headerValueBegin uint
+	headersBuffer    []byte
+	startLineBuff    []byte
+	startLineOffset  uint
 
 	bodyBytesLeft int
 
@@ -65,7 +65,7 @@ func (p *httpRequestParser) Clear() {
 	p.isChunked = false
 	p.headersBuffer = p.headersBuffer[:0]
 	p.startLineBuff = p.startLineBuff[:0]
-	p.startLineBuffOffset = 0
+	p.startLineOffset = 0
 }
 
 /*
@@ -139,7 +139,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 					return reqErr
 				}
 
-				p.startLineBuffOffset = uint(len(p.startLineBuff))
+				p.startLineOffset = uint(len(p.startLineBuff))
 				p.state = path
 				break
 			}
@@ -153,19 +153,19 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			}
 		case path:
 			if char == ' ' {
-				if uint(len(p.startLineBuff)) == p.startLineBuffOffset {
+				if uint(len(p.startLineBuff)) == p.startLineOffset {
 					p.die()
 
 					return ErrInvalidPath
 				}
 
-				if reqErr = p.protocol.OnPath(p.startLineBuff[p.startLineBuffOffset:]); reqErr != nil {
+				if reqErr = p.protocol.OnPath(p.startLineBuff[p.startLineOffset:]); reqErr != nil {
 					p.die()
 
 					return reqErr
 				}
 
-				p.startLineBuffOffset += uint(len(p.startLineBuff[p.startLineBuffOffset:]))
+				p.startLineOffset += uint(len(p.startLineBuff[p.startLineOffset:]))
 				p.state = protocol
 				continue
 			} else if !ascii.IsPrint(char) {
@@ -176,7 +176,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 			p.startLineBuff = append(p.startLineBuff, char)
 
-			if len(p.startLineBuff[p.startLineBuffOffset:]) > p.settings.MaxPathLength {
+			if len(p.startLineBuff[p.startLineOffset:]) > p.settings.MaxPathLength {
 				p.die()
 
 				return ErrBufferOverflow
@@ -190,7 +190,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			default:
 				p.startLineBuff = append(p.startLineBuff, char)
 
-				if len(p.startLineBuff[p.startLineBuffOffset:]) > maxProtocolLength {
+				if len(p.startLineBuff[p.startLineOffset:]) > maxProtocolLength {
 					p.die()
 
 					return ErrBufferOverflow
@@ -205,13 +205,13 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 			p.state = protocolLF
 		case protocolLF:
-			if !IsProtocolSupported(p.startLineBuff[p.startLineBuffOffset:]) {
+			if !IsProtocolSupported(p.startLineBuff[p.startLineOffset:]) {
 				p.die()
 
 				return ErrProtocolNotSupported
 			}
 
-			if reqErr = p.protocol.OnProtocol(p.startLineBuff[p.startLineBuffOffset:]); reqErr != nil {
+			if reqErr = p.protocol.OnProtocol(p.startLineBuff[p.startLineOffset:]); reqErr != nil {
 				p.die()
 
 				return reqErr
@@ -222,16 +222,16 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return reqErr
 			}
 
-			p.headersBuffer = append(p.headersBuffer[:0], char)
+			if !ascii.IsPrint(char) || char == ':' {
+				p.die()
+
+				return ErrInvalidHeader
+			}
+
+			p.headersBuffer = append(p.headersBuffer, char)
 			p.state = headerKey
 		case headerKey:
 			if char == ':' {
-				if len(p.headersBuffer) == 0 {
-					p.die()
-
-					return ErrInvalidHeader
-				}
-
 				p.state = headerColon
 				p.headerValueBegin = uint(len(p.headersBuffer))
 				break
