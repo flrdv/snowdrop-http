@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/floordiv/snowdrop/httpparser"
+	"github.com/fakefloordiv/snowdrop-http/httpparser"
 )
 
 func BenchmarkSmallChunkedBody(b *testing.B) {
