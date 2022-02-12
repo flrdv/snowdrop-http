@@ -222,7 +222,24 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return reqErr
 			}
 
-			if !ascii.IsPrint(char) || char == ':' {
+			if char == '\r' {
+				p.state = headerValueDoubleCR
+				break
+			} else if char == '\n' {
+				if reqErr = p.protocol.OnHeadersComplete(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+				if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+
+				p.Clear()
+				break
+			} else if !ascii.IsPrint(char) || char == ':' {
 				p.die()
 
 				return ErrInvalidHeader
@@ -386,6 +403,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 					return reqErr
 				}
 
+				p.Clear()
 				break
 			}
 
