@@ -85,6 +85,28 @@ func BenchmarkSmallGETRequestFull(b *testing.B) {
 	}
 }
 
+var simple = []byte("GET / HTTP/1.0\r\n\r\n")
+
+func BenchmarkSimple(b *testing.B) {
+	parser, _ := httpparser.NewHTTPRequestParser(&ProtocolV2{}, httpparser.Settings{})
+
+	for i := 0; i < b.N; i++ {
+		parser.Feed(simple)
+	}
+}
+
+func BenchmarkSimpleHeaders(b *testing.B) {
+	protocol := ProtocolV2{}
+	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+	data := []byte("GET / HTTP/1.0\r\nHost: cookie.com\r\n\r\n")
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		parser.Feed(data)
+	}
+}
+
 func BenchmarkBigChromeRequestBy1Char(b *testing.B) {
 	protocol := ProtocolV2{}
 	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
