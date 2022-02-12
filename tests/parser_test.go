@@ -255,8 +255,28 @@ func TestInvalidGETRequestMissingPath(t *testing.T) {
 	testInvalidGETRequest(t, request, httpparser.ErrInvalidPath)
 }
 
-func TestInvalidGETRequestInvalidHeader(t *testing.T) {
+func TestInvalidGETRequestInvalidHeaderNoColon(t *testing.T) {
 	request := []byte("GET / HTTP/1.1\r\nContent-Type some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidHeader)
+}
+
+func TestInvalidGETRequestInvalidHeaderEmptyKey(t *testing.T) {
+	request := []byte("GET / HTTP/1.1\r\n:some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidHeader)
+}
+
+func TestInvalidGETRequestInvalidHeaderEmptyValue(t *testing.T) {
+	request := []byte("GET / HTTP/1.1\r\n\bContent-Type:\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidHeader)
+}
+
+func TestInvalidGETRequestInvalidHeaderNonPrintable(t *testing.T) {
+	request := []byte("GET / HTTP/1.1\r\nContent\b-Type: some content type\r\nHost: rush.dev\r\n\r\n")
+	testInvalidGETRequest(t, request, httpparser.ErrInvalidHeader)
+}
+
+func TestInvalidGETRequestInvalidHeaderFirstCharNonPrintable(t *testing.T) {
+	request := []byte("GET / HTTP/1.1\r\n\bContent-Type: some content type\r\nHost: rush.dev\r\n\r\n")
 	testInvalidGETRequest(t, request, httpparser.ErrInvalidHeader)
 }
 
