@@ -12,7 +12,7 @@ var (
 	closeConnection  = []byte("close")
 )
 
-type IProtocol interface {
+type Protocol interface {
 	OnMessageBegin() error
 	OnMethod([]byte) error
 	OnPath([]byte) error
@@ -24,7 +24,7 @@ type IProtocol interface {
 	OnMessageComplete() error
 }
 type httpRequestParser struct {
-	protocol IProtocol
+	protocol Protocol
 	settings Settings
 
 	state            parsingState
@@ -43,7 +43,7 @@ type httpRequestParser struct {
 /*
 	Returns new initialized instance of parser
 */
-func NewHTTPRequestParser(protocol IProtocol, settings Settings) (*httpRequestParser, error) {
+func NewHTTPRequestParser(protocol Protocol, settings Settings) (*httpRequestParser, error) {
 	if err := protocol.OnMessageBegin(); err != nil {
 		return nil, err
 	}
