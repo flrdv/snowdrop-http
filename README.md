@@ -82,6 +82,12 @@ This settings are passed to parser ALWAYS. It may be even not specified as parse
 
 > *A*: Parser will die and return error from callback to server
 
+<br>
+
+> *Q*: What's if we have a simple request that doesn't even contains headers, for example, `GET / HTTP/1.1\r\n\r\n`?
+
+> *A*: There are 7 obligatory callbacks that are guarantateed to be called (if no errors occurred): `OnMessageBegin`, `OnMethod`, `OnPath`, `OnProtocol`, `OnHeadersBegin`, `OnHeadersComplete`, `OnMessageComplete`. So all them will be called during parsing ANY request except invalid ones
+
 # Example:
 
 ```golang
