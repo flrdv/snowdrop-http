@@ -1,5 +1,5 @@
 # SnowDrop
-A LLHTTP-like HTTP requests parser. As there are no external HTTP parsers in golang (excluding wildcat, but last time it was contributed was 2014), I decided to do it by my own.
+A LLHTTP-like HTTP requests parser. As there are no external HTTP parsers in golang (excluding wildcat, but it doesn't support stream-based parsing and last time it was contributed is 2014), so I decided to do it by my own as I need it for my web-server. The decision to do parser and external package follows the idea that it'll be more clear to divide web-server and http parser, but also to let other people use it in their projects if they need it. 
 
 # Simple usage:
 This parser is inspired by LLHTTP, as I said before. So, you need to implement a protocol, which is a usual struct, but needs to implement such a methods:
