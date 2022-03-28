@@ -23,6 +23,12 @@ type Protocol interface {
 	OnBody([]byte) error
 	OnMessageComplete() error
 }
+
+type HTTPRequestsParser interface {
+	Feed([]byte) error
+	Clear()
+}
+
 type httpRequestParser struct {
 	protocol Protocol
 	settings Settings
