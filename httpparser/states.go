@@ -6,7 +6,8 @@ type (
 )
 
 const (
-	method parsingState = iota + 1
+	messageBegin parsingState = iota + 1
+	method
 	path
 	protocol
 	protocolCR
