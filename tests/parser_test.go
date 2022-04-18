@@ -408,6 +408,43 @@ func TestParserReuseAbility(t *testing.T) {
 	}
 }
 
+func testOnlyLFGETRequest(t *testing.T, n int) {
+	protocol := Protocol{}
+	parser, err := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
+
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+
+	request := []byte("GET / HTTP/1.1\nServer: indigo\n\n")
+
+	if n < 0 {
+		n = len(request)
+	}
+
+	err = FeedParser(parser, request, n)
+
+	if err != nil {
+		t.Fatal(err)
+		return
+	} else if !protocol.Completed {
+		t.Fatal("wanted completion flag, got nothing")
+	}
+}
+
+func TestOnlyLFGETRequestFull(t *testing.T) {
+	testOnlyLFGETRequest(t, -1)
+}
+
+func TestOnlyLFGETRequest5Chars(t *testing.T) {
+	testOnlyLFGETRequest(t, 5)
+}
+
+func TestOnlyLFGETRequest1Char(t *testing.T) {
+	testOnlyLFGETRequest(t, 1)
+}
+
 func TestConnectionClose(t *testing.T) {
 	protocol := Protocol{}
 	parser, _ := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
