@@ -87,6 +87,13 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return reqErr
 			}
 
+			reqErr = p.protocol.OnMessageComplete()
+
+			switch reqErr.(type) {
+			case Upgrade:
+				return reqErr
+			}
+
 			// to let server know that we received everything, and it's time to close the connection
 			return ErrConnectionClosed
 		}
@@ -97,6 +104,14 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 	switch p.state {
 	case dead:
 		return ErrParserIsDead
+	case messageBegin:
+		if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
+			p.die()
+
+			return reqErr
+		}
+
+		p.state = method
 	case body:
 		done, extra, err := p.pushBodyPiece(data)
 
@@ -109,10 +124,18 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 		if done {
 			p.Clear()
 
-			if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+			reqErr = p.protocol.OnMessageComplete()
+
+			switch reqErr.(type) {
+			case nil:
+			case Upgrade:
+				p.state = messageBegin
+
+				return reqErr
+			default:
 				p.die()
 
-				return err
+				return reqErr
 			}
 
 			if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
@@ -237,13 +260,22 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 					return reqErr
 				}
-				if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+
+				p.Clear()
+				reqErr = p.protocol.OnMessageComplete()
+
+				switch reqErr.(type) {
+				case nil:
+				case Upgrade:
+					p.state = messageBegin
+
+					return reqErr
+				default:
 					p.die()
 
 					return reqErr
 				}
 
-				p.Clear()
 				break
 			} else if !ascii.IsPrint(char) || char == ':' {
 				p.die()
@@ -374,8 +406,40 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			case '\r':
 				p.state = headerValueDoubleCR
 			case '\n':
+				if reqErr = p.protocol.OnHeadersComplete(); reqErr != nil {
+					p.die()
+
+					return reqErr
+				}
+
 				if p.closeConnection {
 					p.state = bodyConnectionClose
+					// anyway in case of empty byte data it will stop parsing, so it's safe
+					// but also keeps amount of body bytes limited
+					p.bodyBytesLeft = p.settings.MaxBodyLength
+					break
+				} else if p.bodyBytesLeft == 0 && !p.isChunked {
+					p.Clear()
+					reqErr = p.protocol.OnMessageComplete()
+
+					switch reqErr.(type) {
+					case nil:
+					case Upgrade:
+						p.state = messageBegin
+
+						return reqErr
+					default:
+						p.die()
+
+						return reqErr
+					}
+
+					if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
+						p.die()
+
+						return reqErr
+					}
+
 					break
 				}
 
@@ -391,25 +455,30 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return ErrRequestSyntaxError
 			} else if p.closeConnection {
 				p.state = bodyConnectionClose
-				// anyway in case of empty bytes data it will stop parsing, so it's safe
-				// but also keeps amount of body bytes limited
 				p.bodyBytesLeft = p.settings.MaxBodyLength
 				break
 			} else if p.bodyBytesLeft == 0 && !p.isChunked {
 				p.Clear()
+				reqErr = p.protocol.OnMessageComplete()
 
-				if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+				switch reqErr.(type) {
+				case nil:
+				case Upgrade:
+					p.state = messageBegin
+
+					return reqErr
+				default:
 					p.die()
 
 					return reqErr
 				}
+
 				if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
 					p.die()
 
 					return reqErr
 				}
 
-				p.Clear()
 				break
 			}
 
@@ -426,19 +495,32 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 			if done {
 				p.Clear()
 
-				if reqErr = p.protocol.OnMessageComplete(); reqErr != nil {
+				reqErr = p.protocol.OnMessageComplete()
+
+				switch reqErr.(type) {
+				case nil:
+				case Upgrade:
+					// this is the only place where this state is used only
+					// because only here we really need it. In case connection
+					// may be upgraded, we may not need this parser to parse
+					// next message, so calling OnMessageBegin() is necessary
+					p.state = messageBegin
+
+					return reqErr
+				default:
 					p.die()
 
 					return reqErr
 				}
+
 				if reqErr = p.protocol.OnMessageBegin(); reqErr != nil {
 					p.die()
 
 					return reqErr
 				}
 
-				if err = p.Feed(extra); err != nil {
-					return err
+				if reqErr = p.Feed(extra); reqErr != nil {
+					return reqErr
 				}
 			}
 
