@@ -2,6 +2,18 @@ package httpparser
 
 import "errors"
 
+type Upgrade struct {
+	protos string
+}
+
+func (u Upgrade) Error() string {
+	return u.protos
+}
+
+func NewUpgrade(protos string) error {
+	return Upgrade{protos: protos}
+}
+
 var (
 	ErrInvalidMethod        = errors.New("ErrInvalidMethod: invalid method")
 	ErrInvalidPath          = errors.New("ErrInvalidPath: path is empty or contains disallowed characters")
