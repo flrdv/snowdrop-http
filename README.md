@@ -80,7 +80,7 @@ This settings are passed to parser ALWAYS. It may be even not specified as parse
 
 > *Q*: What's if an error occurred in protocol callback? 
 
-> *A*: Parser will die and return error from callback to server
+> *A*: Parser will die and return error from callback to server, BUT in case `httpparser.Upgrade` struct is returned from `OnMessageComplete()`, server won't die, but will just return the error to http server. Warning: in case `httpparser.Upgrade` will be returned from any other callback, this won't work and parser will die anyway
 
 <br>
 
@@ -133,5 +133,7 @@ Parser also can return errors:
 - `ErrParserIsDead`
 
 Important: this is not a finite list of errors may be returned by parser. In case of errors returned from callbacks, parser will die and return error from callback
+
+Also `httpparser.Upgrade` struct may be returned as an error. It can be constructed from `httpparser.NewUpgrade(string)` function
 
 Details about errors you can find in [httpparser/errors.go](https://github.com/fakefloordiv/snowdrop-http/blob/master/httpparser/errors.go)
