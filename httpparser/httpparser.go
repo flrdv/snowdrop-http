@@ -152,10 +152,10 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 		return nil
 	}
 
-	for i, char := range data {
+	for i := 0; i < len(data); i++ {
 		switch p.state {
 		case method:
-			if char == ' ' {
+			if data[i] == ' ' {
 				if !IsMethodValid(p.startLineBuff) {
 					p.die()
 
@@ -173,7 +173,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				break
 			}
 
-			p.startLineBuff = append(p.startLineBuff, char)
+			p.startLineBuff = append(p.startLineBuff, data[i])
 
 			if len(p.startLineBuff) > maxMethodLength {
 				p.die()
@@ -181,7 +181,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return ErrInvalidMethod
 			}
 		case path:
-			if char == ' ' {
+			if data[i] == ' ' {
 				if uint(len(p.startLineBuff)) == p.startLineOffset {
 					p.die()
 
@@ -197,13 +197,13 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				p.startLineOffset += uint(len(p.startLineBuff[p.startLineOffset:]))
 				p.state = protocol
 				continue
-			} else if !ascii.IsPrint(char) {
+			} else if !ascii.IsPrint(data[i]) {
 				p.die()
 
 				return ErrInvalidPath
 			}
 
-			p.startLineBuff = append(p.startLineBuff, char)
+			p.startLineBuff = append(p.startLineBuff, data[i])
 
 			if len(p.startLineBuff[p.startLineOffset:]) > p.settings.MaxPathLength {
 				p.die()
@@ -211,13 +211,13 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return ErrBufferOverflow
 			}
 		case protocol:
-			switch char {
+			switch data[i] {
 			case '\r':
 				p.state = protocolCR
 			case '\n':
 				p.state = protocolLF
 			default:
-				p.startLineBuff = append(p.startLineBuff, char)
+				p.startLineBuff = append(p.startLineBuff, data[i])
 
 				if len(p.startLineBuff[p.startLineOffset:]) > maxProtocolLength {
 					p.die()
@@ -226,7 +226,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				}
 			}
 		case protocolCR:
-			if char != '\n' {
+			if data[i] != '\n' {
 				p.die()
 
 				return ErrRequestSyntaxError
@@ -251,10 +251,10 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				return reqErr
 			}
 
-			if char == '\r' {
+			if data[i] == '\r' {
 				p.state = headerValueDoubleCR
 				break
-			} else if char == '\n' {
+			} else if data[i] == '\n' {
 				if reqErr = p.protocol.OnHeadersComplete(); reqErr != nil {
 					p.die()
 
@@ -277,26 +277,26 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				}
 
 				break
-			} else if !ascii.IsPrint(char) || char == ':' {
+			} else if !ascii.IsPrint(data[i]) || data[i] == ':' {
 				p.die()
 
 				return ErrInvalidHeader
 			}
 
-			p.headersBuffer = append(p.headersBuffer, char)
+			p.headersBuffer = append(p.headersBuffer, data[i])
 			p.state = headerKey
 		case headerKey:
-			if char == ':' {
+			if data[i] == ':' {
 				p.state = headerColon
 				p.headerValueBegin = uint(len(p.headersBuffer))
 				break
-			} else if !ascii.IsPrint(char) {
+			} else if !ascii.IsPrint(data[i]) {
 				p.die()
 
 				return ErrInvalidHeader
 			}
 
-			p.headersBuffer = append(p.headersBuffer, char)
+			p.headersBuffer = append(p.headersBuffer, data[i])
 
 			if len(p.headersBuffer) >= p.settings.MaxHeaderLineLength {
 				p.die()
@@ -306,29 +306,29 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 		case headerColon:
 			p.state = headerValue
 
-			if !ascii.IsPrint(char) {
+			if !ascii.IsPrint(data[i]) {
 				p.die()
 
 				return ErrInvalidHeader
 			}
 
-			if char != ' ' {
-				p.headersBuffer = append(p.headersBuffer, char)
+			if data[i] != ' ' {
+				p.headersBuffer = append(p.headersBuffer, data[i])
 			}
 		case headerValue:
-			switch char {
+			switch data[i] {
 			case '\r':
 				p.state = headerValueCR
 			case '\n':
 				p.state = headerValueLF
 			default:
-				if !ascii.IsPrint(char) {
+				if !ascii.IsPrint(data[i]) {
 					p.die()
 
 					return ErrInvalidHeader
 				}
 
-				p.headersBuffer = append(p.headersBuffer, char)
+				p.headersBuffer = append(p.headersBuffer, data[i])
 
 				if len(p.headersBuffer) > p.settings.MaxHeaderLineLength {
 					p.die()
@@ -337,7 +337,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				}
 			}
 		case headerValueCR:
-			if char != '\n' {
+			if data[i] != '\n' {
 				p.die()
 
 				return ErrRequestSyntaxError
@@ -402,7 +402,7 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 				}
 			}
 
-			switch char {
+			switch data[i] {
 			case '\r':
 				p.state = headerValueDoubleCR
 			case '\n':
@@ -445,11 +445,11 @@ func (p *httpRequestParser) Feed(data []byte) (reqErr error) {
 
 				p.state = body
 			default:
-				p.headersBuffer = append(p.headersBuffer[:0], char)
+				p.headersBuffer = append(p.headersBuffer[:0], data[i])
 				p.state = headerKey
 			}
 		case headerValueDoubleCR:
-			if char != '\n' {
+			if data[i] != '\n' {
 				p.die()
 
 				return ErrRequestSyntaxError
