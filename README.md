@@ -98,13 +98,13 @@ import (
 )
 
 
-type Protocol struct {
-	// implement httpparser.IProtocol here
+type MyProtocol struct {
+	// implement httpparser.Protocol here
 }
 
 
 func main() {
-	protocol := Protocol{...}
+	protocol := MyProtocol{...}
 	parser := httpparser.NewHTTPRequestParser(&protocol, httpparser.Settings{})
 	data := ... // http request taken from any source, with []byte type
 	
